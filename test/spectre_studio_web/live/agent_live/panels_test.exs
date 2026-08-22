@@ -83,34 +83,16 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
       assert html =~ "locked"
     end
 
-    test "monitoring starts only when asked, and streams once it does", %{conn: conn, spec: spec} do
+    test "an empty runtime has no subject control and explains how to start a process", %{
+      conn: conn,
+      spec: spec
+    } do
       {:ok, live, html} = live(conn, agent_path(spec, :monitor))
 
       assert html =~ "not streaming"
-      assert html =~ "enable live"
-      assert html =~ "inspect all 19 publication-safe fields"
-
-      html =
-        live
-        |> form("#monitor-form", %{
-          "monitor" => %{"subject" => "account-1", "interval_ms" => "250", "duration_ms" => ""}
-        })
-        |> render_submit()
-
-      # The subscription id is the host's to mint, so the control reports the
-      # request in flight until the reply lands.
-      assert html =~ "enabling…"
-      refute html =~ "enable live"
-
-      assert_receive {:monitor_enabled, _id, _request, subscription_id}, 5_000
-      assert_receive {:monitor_update, _id, ^subscription_id, _subscription}, 5_000
-
-      html = render(live)
-      assert html =~ "disable live"
-      assert html =~ "kB"
-      assert html =~ "term-spark"
-      assert html =~ "OTP process snapshot"
-      assert html =~ "message_queue_len"
+      assert html =~ "No active Agent processes"
+      assert has_element?(live, "#refresh-processes")
+      refute has_element?(live, "#monitor_subject")
     end
 
     test "discovers a live Instance and starts OTP monitoring automatically", %{conn: conn} do
@@ -121,31 +103,26 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
       assert_receive {:monitor_update, _id, ^subscription_id, _subscription}, 5_000
 
       html = render(live)
-      assert html =~ "live Instance"
-      assert html =~ "conversation-42"
+      assert html =~ "active processes"
+      assert html =~ "process 1"
+      refute has_element?(live, "#monitor_subject")
       assert html =~ "OTP process snapshot"
       assert html =~ "message_queue_len"
     end
 
-    test "a subject is required to select an Instance", %{conn: conn, spec: spec} do
+    test "process discovery can be refreshed without operator identifiers", %{
+      conn: conn,
+      spec: spec
+    } do
       {:ok, live, _html} = live(conn, agent_path(spec, :monitor))
-
-      html =
-        live
-        |> form("#monitor-form", %{"monitor" => %{"subject" => "  "}})
-        |> render_submit()
-
-      assert html =~ "a subject is required"
+      html = live |> element("#refresh-processes") |> render_click()
+      assert html =~ "No active Agent processes"
+      refute has_element?(live, "#monitor_subject")
     end
 
-    test "leaving the monitor panel stops the stream", %{conn: conn, spec: spec} do
+    test "leaving the monitor panel stops the stream", %{conn: conn} do
+      spec = connected_endpoint(instances: ["account-1"])
       {:ok, live, _html} = live(conn, agent_path(spec, :monitor))
-
-      live
-      |> form("#monitor-form", %{
-        "monitor" => %{"subject" => "account-1", "interval_ms" => "250"}
-      })
-      |> render_submit()
 
       assert_receive {:monitor_enabled, _id, _request, subscription_id}, 5_000
 
@@ -238,24 +215,12 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
         "agent.operations.stream"
       ]
 
-      {:ok, spec: connected_endpoint(scopes: scopes)}
+      {:ok, spec: connected_endpoint(scopes: scopes, instances: ["account-1"])}
     end
 
     test "streams publication-safe Work and Vigil snapshots", %{conn: conn, spec: spec} do
       {:ok, live, html} = live(conn, agent_path(spec, :operations))
       assert html =~ "not streaming"
-      assert html =~ "watch Work / Vigil"
-
-      live
-      |> form("#operations-form", %{
-        "operations" => %{
-          "subject" => "account-1",
-          "kinds" => "all",
-          "interval_ms" => "250",
-          "duration_ms" => ""
-        }
-      })
-      |> render_submit()
 
       assert_receive {:operations_monitor_enabled, _id, _request, subscription_id}, 5_000
       assert_receive {:operations_monitor_update, _id, ^subscription_id, _subscription}, 5_000
@@ -280,6 +245,7 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
        spec:
          connected_endpoint(
            scopes: scopes,
+           instances: ["missing-instance"],
            reject_subject: "missing-instance"
          )}
     end
@@ -290,16 +256,11 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
     } do
       {:ok, live, _html} = live(conn, agent_path(spec, :monitor))
 
-      live
-      |> form("#monitor-form", %{
-        "monitor" => %{"subject" => "missing-instance", "interval_ms" => "1000"}
-      })
-      |> render_submit()
-
       assert_eventually(live, "routing/instance_not_found")
       html = render(live)
       refute html =~ "enabling…"
-      assert html =~ "enable live"
+      assert html =~ "start live"
+      refute has_element?(live, "#monitor_subject")
     end
 
     test "the Work/Vigil panel leaves enabling and displays the correlated error", %{
@@ -308,20 +269,11 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
     } do
       {:ok, live, _html} = live(conn, agent_path(spec, :operations))
 
-      live
-      |> form("#operations-form", %{
-        "operations" => %{
-          "subject" => "missing-instance",
-          "kinds" => "all",
-          "interval_ms" => "1000"
-        }
-      })
-      |> render_submit()
-
       assert_eventually(live, "routing/instance_not_found")
       html = render(live)
       refute html =~ "enabling…"
       assert html =~ "watch Work / Vigil"
+      refute has_element?(live, "#operations_subject")
     end
   end
 

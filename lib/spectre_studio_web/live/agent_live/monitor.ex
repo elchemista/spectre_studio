@@ -2,11 +2,11 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
   @moduledoc """
   Realtime runtime monitoring for one Agent Instance.
 
-  The lifecycle Pulse asks for in `docs/STUDIO_MONITORING.md` falls out of this
-  page existing at all: monitoring starts only when the operator asks, the
-  subscription id comes from the host, and leaving the panel ends this process —
-  which disables the stream both here and, as a backstop, through the connection
-  process watching this pid.
+  The panel discovers authorized live processes and begins sampling without
+  asking the operator for the internal Subject key. The subscription id still
+  comes from the host, and leaving the panel ends this process — which disables
+  the stream both here and, as a backstop, through the connection process
+  watching this pid.
   """
 
   use SpectreStudioWeb, :live_view
@@ -44,6 +44,7 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
           |> assign(:subscription, nil)
           |> assign(:pending?, false)
           |> assign(:pending_request_id, nil)
+          |> assign(:selected_subject, nil)
           |> assign(:error, nil)
           |> assign(:fields, Connection.default_fields())
           |> assign(:summary_fields, @summary_fields)
@@ -61,32 +62,40 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
 
   @impl Phoenix.LiveView
   def handle_event("enable", %{"monitor" => params}, socket) do
-    subject = String.trim(params["subject"] || "")
+    case socket.assigns.selected_subject do
+      subject when is_binary(subject) ->
+        {:noreply, enable_subject(disable(socket), subject, params)}
 
-    if subject == "" do
-      {:noreply, assign(socket, :error, "a subject is required to select an Instance")}
-    else
-      {:noreply, enable_subject(socket, subject, params)}
+      nil ->
+        {:noreply, request_discovery(socket)}
     end
   end
 
   def handle_event("disable", _params, socket), do: {:noreply, disable(socket)}
 
+  def handle_event("refresh", _params, socket), do: {:noreply, request_discovery(socket)}
+
+  def handle_event("select_process", %{"subject" => subject}, socket) do
+    if Enum.any?(socket.assigns.instances, &(&1["subject"] == subject)) do
+      params = form_params(socket.assigns.form)
+      {:noreply, enable_subject(disable(socket), subject, params)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   @impl Phoenix.LiveView
   def handle_info(:discover_instances, socket) do
-    case Shell.refresh_instances(socket) do
-      {:ok, _request_id} -> {:noreply, socket}
-      {:error, reason} -> {:noreply, assign(socket, :error, describe(reason))}
-    end
+    {:noreply, request_discovery(socket)}
   end
 
   def handle_info({:instances_changed, _id, address, instances}, socket)
       when address == socket.assigns.agent.address do
-    subject = Shell.first_subject(instances)
-    socket = assign(socket, :instances, instances)
+    subject = selected_or_first(socket.assigns.selected_subject, instances)
+    socket = assign(socket, instances: instances, selected_subject: subject, error: nil)
 
     if subject && is_nil(socket.assigns.subscription_id) && not socket.assigns.pending? do
-      params = %{"subject" => subject, "interval_ms" => "1000", "duration_ms" => ""}
+      params = form_params(socket.assigns.form)
       {:noreply, enable_subject(socket, subject, params)}
     else
       {:noreply, socket}
@@ -205,10 +214,11 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
     case Connection.enable_monitor(socket.assigns.connection.id, opts) do
       {:ok, request_id} ->
         socket
+        |> assign(:selected_subject, subject)
         |> assign(:pending?, true)
         |> assign(:pending_request_id, request_id)
         |> assign(:error, nil)
-        |> assign(:form, monitor_form(Map.put(params, "subject", subject)))
+        |> assign(:form, monitor_form(params))
 
       {:error, reason} ->
         socket |> assign(:pending?, false) |> assign(:error, describe(reason))
@@ -218,12 +228,31 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
   defp monitor_form(params \\ %{}) do
     to_form(
       %{
-        "subject" => Map.get(params, "subject", ""),
         "interval_ms" => Map.get(params, "interval_ms", "1000"),
         "duration_ms" => Map.get(params, "duration_ms", "")
       },
       as: :monitor
     )
+  end
+
+  defp request_discovery(socket) do
+    case Shell.refresh_instances(socket) do
+      {:ok, _request_id} -> assign(socket, :error, nil)
+      {:error, reason} -> assign(socket, :error, describe(reason))
+    end
+  end
+
+  defp selected_or_first(selected, instances) do
+    if is_binary(selected) and Enum.any?(instances, &(&1["subject"] == selected)),
+      do: selected,
+      else: Shell.first_subject(instances)
+  end
+
+  defp form_params(form) do
+    %{
+      "interval_ms" => form[:interval_ms].value,
+      "duration_ms" => form[:duration_ms].value
+    }
   end
 
   defp to_integer(value) when value in [nil, ""], do: nil
@@ -277,35 +306,52 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
 
           <hr class="term-rule my-6" />
 
-          <.form for={@form} id="monitor-form" phx-submit="enable" class="grid gap-4 md:grid-cols-4">
-            <div class="md:col-span-2">
-              <.input
-                :if={@instances != []}
-                field={@form[:subject]}
-                type="select"
-                label="live Instance"
-                options={Enum.map(@instances, &{&1["subject"], &1["subject"]})}
-              />
-              <.input
-                :if={@instances == []}
-                field={@form[:subject]}
-                label="subject"
-                placeholder="waiting for a live Instance…"
-              />
+          <div id="active-processes" class="mb-5">
+            <div :if={@instances == []} class="flex flex-wrap items-center justify-between gap-4">
+              <p class="term-comment text-[0.75rem] t-dim">
+                No active Agent processes. Send a message to the Agent, then refresh.
+              </p>
+              <.button id="refresh-processes" type="button" phx-click="refresh">
+                refresh processes
+              </.button>
             </div>
+
+            <div :if={@instances != []} class="flex flex-wrap items-center gap-3">
+              <span class="term-label">active processes</span>
+              <button
+                :for={{instance, index} <- Enum.with_index(@instances, 1)}
+                id={"select-process-#{index}"}
+                type="button"
+                phx-click="select_process"
+                phx-value-subject={instance["subject"]}
+                class={[
+                  "term-chip cursor-pointer transition",
+                  instance["subject"] == @selected_subject && "border-[var(--fg)] t-strong"
+                ]}
+              >
+                process {index} · {instance["pid"] || "starting"}
+              </button>
+              <.button id="refresh-processes" type="button" phx-click="refresh">refresh</.button>
+            </div>
+          </div>
+
+          <.form for={@form} id="monitor-form" phx-submit="enable" class="grid gap-4 md:grid-cols-2">
             <div>
               <.input field={@form[:interval_ms]} type="select" label="interval" options={@intervals} />
             </div>
             <div>
               <.input field={@form[:duration_ms]} type="select" label="duration" options={@durations} />
             </div>
-            <div class="flex flex-wrap items-center gap-3 md:col-span-4">
-              <.button :if={is_nil(@subscription_id) and not @pending?} variant="primary">
-                enable live
+            <div class="flex flex-wrap items-center gap-3 md:col-span-2">
+              <.button
+                :if={@instances != [] and is_nil(@subscription_id) and not @pending?}
+                variant="primary"
+              >
+                start live
               </.button>
               <.button :if={@pending?} type="button" disabled>enabling…</.button>
               <.button :if={@subscription_id} type="button" phx-click="disable">
-                disable live
+                pause live
               </.button>
               <span :if={gaps(@subscription) > 0} class="term-comment text-[0.72rem] t-faint">
                 {gaps(@subscription)} observation gaps — samples never seen, not zeroes
@@ -323,7 +369,7 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
       <div class="mt-6">
         <.term_window title="OTP process snapshot" status={snapshot_status(@subscription)}>
           <p :if={is_nil(@subscription)} class="text-[0.75rem] leading-6 t-dim">
-            Enable live monitoring to inspect all {length(@fields)} publication-safe fields.
+            Process details appear automatically when an Agent process is active.
           </p>
 
           <div :if={@subscription} class="grid gap-x-8 md:grid-cols-2 xl:grid-cols-3">
@@ -337,7 +383,8 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
           </div>
 
           <div :if={@subscription} class="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-[0.68rem] t-faint">
-            <span>subject: {@subscription.subject}</span>
+            <span>pid: {@subscription.snapshot["pid"] || "—"}</span>
+            <span>node: {@subscription.snapshot["node"] || "—"}</span>
             <span>sequence: {@subscription.sequence}</span>
             <span>dropped updates: {@subscription.dropped}</span>
             <span>sampled: {sampled_at(@subscription)}</span>

@@ -29,6 +29,7 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
           |> assign(:subscription, nil)
           |> assign(:pending?, false)
           |> assign(:pending_request_id, nil)
+          |> assign(:selected_subject, nil)
           |> assign(:error, nil)
           |> assign(:intervals, @intervals)
           |> assign(:durations, @durations)
@@ -45,40 +46,39 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
 
   @impl Phoenix.LiveView
   def handle_event("enable", %{"operations" => params}, socket) do
-    subject = String.trim(params["subject"] || "")
+    case socket.assigns.selected_subject do
+      subject when is_binary(subject) ->
+        {:noreply, enable_subject(disable(socket), subject, params)}
 
-    if subject == "" do
-      {:noreply, assign(socket, :error, "a subject is required to select an Instance")}
-    else
-      {:noreply, enable_subject(socket, subject, params)}
+      nil ->
+        {:noreply, request_discovery(socket)}
     end
   end
 
   def handle_event("disable", _params, socket), do: {:noreply, disable(socket)}
 
+  def handle_event("refresh", _params, socket), do: {:noreply, request_discovery(socket)}
+
+  def handle_event("select_process", %{"subject" => subject}, socket) do
+    if Enum.any?(socket.assigns.instances, &(&1["subject"] == subject)) do
+      {:noreply, enable_subject(disable(socket), subject, form_params(socket.assigns.form))}
+    else
+      {:noreply, socket}
+    end
+  end
+
   @impl Phoenix.LiveView
   def handle_info(:discover_instances, socket) do
-    case Shell.refresh_instances(socket) do
-      {:ok, _request_id} -> {:noreply, socket}
-      {:error, reason} -> {:noreply, assign(socket, :error, describe(reason))}
-    end
+    {:noreply, request_discovery(socket)}
   end
 
   def handle_info({:instances_changed, _id, address, instances}, socket)
       when address == socket.assigns.agent.address do
-    subject = Shell.first_subject(instances)
-    socket = assign(socket, :instances, instances)
+    subject = selected_or_first(socket.assigns.selected_subject, instances)
+    socket = assign(socket, instances: instances, selected_subject: subject, error: nil)
 
     if subject && is_nil(socket.assigns.subscription_id) && not socket.assigns.pending? do
-      params = %{
-        "subject" => subject,
-        "kinds" => "all",
-        "interval_ms" => "1000",
-        "duration_ms" => "",
-        "include_terminal" => "false"
-      }
-
-      {:noreply, enable_subject(socket, subject, params)}
+      {:noreply, enable_subject(socket, subject, form_params(socket.assigns.form))}
     else
       {:noreply, socket}
     end
@@ -177,27 +177,43 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
 
           <hr class="term-rule my-6" />
 
+          <div id="active-operation-processes" class="mb-5">
+            <div :if={@instances == []} class="flex flex-wrap items-center justify-between gap-4">
+              <p class="term-comment text-[0.75rem] t-dim">
+                No active Agent processes. Send a message to the Agent, then refresh.
+              </p>
+              <.button id="refresh-operation-processes" type="button" phx-click="refresh">
+                refresh processes
+              </.button>
+            </div>
+
+            <div :if={@instances != []} class="flex flex-wrap items-center gap-3">
+              <span class="term-label">active processes</span>
+              <button
+                :for={{instance, index} <- Enum.with_index(@instances, 1)}
+                id={"select-operation-process-#{index}"}
+                type="button"
+                phx-click="select_process"
+                phx-value-subject={instance["subject"]}
+                class={[
+                  "term-chip cursor-pointer transition",
+                  instance["subject"] == @selected_subject && "border-[var(--fg)] t-strong"
+                ]}
+              >
+                process {index} · {instance["pid"] || "starting"}
+              </button>
+              <.button id="refresh-operation-processes" type="button" phx-click="refresh">
+                refresh
+              </.button>
+            </div>
+          </div>
+
           <.form
             for={@form}
             id="operations-form"
             phx-submit="enable"
-            class="grid gap-4 md:grid-cols-4"
+            class="grid gap-4 md:grid-cols-3"
           >
-            <div>
-              <.input
-                :if={@instances != []}
-                field={@form[:subject]}
-                type="select"
-                label="live Instance"
-                options={Enum.map(@instances, &{&1["subject"], &1["subject"]})}
-              />
-              <.input
-                :if={@instances == []}
-                field={@form[:subject]}
-                label="subject"
-                placeholder="waiting for a live Instance…"
-              />
-            </div>
             <div>
               <.input field={@form[:kinds]} type="select" label="loops" options={@kind_options} />
             </div>
@@ -207,11 +223,14 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
             <div>
               <.input field={@form[:duration_ms]} type="select" label="duration" options={@durations} />
             </div>
-            <div class="md:col-span-4">
+            <div class="md:col-span-3">
               <.input field={@form[:include_terminal]} type="checkbox" label="include terminal loops" />
             </div>
-            <div class="flex flex-wrap items-center gap-3 md:col-span-4">
-              <.button :if={is_nil(@subscription_id) and not @pending?} variant="primary">
+            <div class="flex flex-wrap items-center gap-3 md:col-span-3">
+              <.button
+                :if={@instances != [] and is_nil(@subscription_id) and not @pending?}
+                variant="primary"
+              >
                 watch Work / Vigil
               </.button>
               <.button :if={@pending?} type="button" disabled>enabling…</.button>
@@ -289,10 +308,11 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
     case Connection.enable_operations_monitor(socket.assigns.connection.id, opts) do
       {:ok, request_id} ->
         socket
+        |> assign(:selected_subject, subject)
         |> assign(:pending?, true)
         |> assign(:pending_request_id, request_id)
         |> assign(:error, nil)
-        |> assign(:form, operations_form(Map.put(params, "subject", subject)))
+        |> assign(:form, operations_form(params))
 
       {:error, reason} ->
         socket |> assign(:pending?, false) |> assign(:error, describe(reason))
@@ -320,7 +340,6 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
   defp operations_form(params \\ %{}) do
     to_form(
       %{
-        "subject" => Map.get(params, "subject", ""),
         "kinds" => Map.get(params, "kinds", "all"),
         "interval_ms" => Map.get(params, "interval_ms", "1000"),
         "duration_ms" => Map.get(params, "duration_ms", ""),
@@ -328,6 +347,28 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
       },
       as: :operations
     )
+  end
+
+  defp request_discovery(socket) do
+    case Shell.refresh_instances(socket) do
+      {:ok, _request_id} -> assign(socket, :error, nil)
+      {:error, reason} -> assign(socket, :error, describe(reason))
+    end
+  end
+
+  defp selected_or_first(selected, instances) do
+    if is_binary(selected) and Enum.any?(instances, &(&1["subject"] == selected)),
+      do: selected,
+      else: Shell.first_subject(instances)
+  end
+
+  defp form_params(form) do
+    %{
+      "kinds" => form[:kinds].value,
+      "interval_ms" => form[:interval_ms].value,
+      "duration_ms" => form[:duration_ms].value,
+      "include_terminal" => to_string(form[:include_terminal].value)
+    }
   end
 
   @spec kinds(String.t() | nil) :: [String.t()]

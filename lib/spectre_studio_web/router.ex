@@ -38,6 +38,7 @@ defmodule SpectreStudioWeb.Router do
       live "/connections/:id/agents/:address/monitor", AgentLive.Monitor, :show
       live "/connections/:id/agents/:address/operations", AgentLive.Operations, :show
       live "/connections/:id/agents/:address/cache", AgentLive.Cache, :show
+      live "/connections/:id/agents/:address/journal", AgentLive.Journal, :show
       live "/connections/:id/agents/:address/evolve", AgentLive.Evolve, :show
       live "/connections/:id/agents/:address/messages", AgentLive.Messages, :show
       live "/connections/:id/agents/:address/events", AgentLive.Events, :show

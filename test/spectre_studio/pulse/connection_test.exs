@@ -122,6 +122,46 @@ defmodule SpectreStudio.Pulse.ConnectionTest do
       assert {:ok, %{status: :ready}} = Connection.snapshot(spec.id)
     end
 
+    test "correlates an initial monitor rejection and releases the pending request" do
+      rejected = start_connection(start_endpoint(reject_subject: "missing-instance"))
+      Connection.connect(rejected.id)
+      assert_receive {:connection_status, rejected_id, :ready}, 2_000
+      assert rejected_id == rejected.id
+
+      assert {:ok, request_id} =
+               Connection.enable_monitor(rejected.id,
+                 agent_address: @address,
+                 subject: "missing-instance"
+               )
+
+      assert_receive {:monitor_failed, ^rejected_id, ^request_id, error}, 2_000
+      assert error["kind"] == "routing"
+      assert error["code"] == "instance_not_found"
+      refute_receive {:monitor_enabled, ^rejected_id, ^request_id, _subscription_id}, 100
+
+      assert {:ok, snapshot} = Connection.snapshot(rejected.id)
+      assert snapshot.last_error == "routing/instance_not_found"
+    end
+
+    test "releases an unanswered monitor request when the connection closes" do
+      unanswered = start_connection(start_endpoint(ignore_subject: "slow-instance"))
+      Connection.connect(unanswered.id)
+      assert_receive {:connection_status, unanswered_id, :ready}, 2_000
+      assert unanswered_id == unanswered.id
+
+      assert {:ok, request_id} =
+               Connection.enable_monitor(unanswered.id,
+                 agent_address: @address,
+                 subject: "slow-instance"
+               )
+
+      Connection.disconnect(unanswered.id)
+
+      assert_receive {:monitor_failed, ^unanswered_id, ^request_id, error}, 2_000
+      assert error == %{"kind" => "transport", "code" => "connection_lost"}
+      assert_receive {:connection_status, ^unanswered_id, :closed}, 2_000
+    end
+
     test "a dead panel takes its subscription with it", %{spec: spec} do
       test_pid = self()
 

@@ -32,6 +32,8 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
     {"15 min", "900000"}
   ]
 
+  @summary_fields ~w(memory message_queue_len reductions status total_heap_size)
+
   @impl Phoenix.LiveView
   def mount(params, _session, socket) do
     case Shell.mount_agent(socket, params, :monitor, :monitor_stream) do
@@ -41,8 +43,10 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
          |> assign(:subscription_id, nil)
          |> assign(:subscription, nil)
          |> assign(:pending?, false)
+         |> assign(:pending_request_id, nil)
          |> assign(:error, nil)
          |> assign(:fields, Connection.default_fields())
+         |> assign(:summary_fields, @summary_fields)
          |> assign(:intervals, @intervals)
          |> assign(:durations, @durations)
          |> assign(:form, monitor_form())}
@@ -68,13 +72,14 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
       ]
 
       case Connection.enable_monitor(socket.assigns.connection.id, opts) do
-        {:ok, _request_id} ->
+        {:ok, request_id} ->
           # The subscription id only exists once the host replies. Until then the
           # control reports the request in flight — leaving it on "enable" invites
           # a second click and a second subscription for the same panel.
           {:noreply,
            socket
            |> assign(:pending?, true)
+           |> assign(:pending_request_id, request_id)
            |> assign(:error, nil)
            |> assign(:form, monitor_form(params))}
 
@@ -87,9 +92,31 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
   def handle_event("disable", _params, socket), do: {:noreply, disable(socket)}
 
   @impl Phoenix.LiveView
-  def handle_info({:monitor_enabled, _id, _request_id, subscription_id}, socket) do
-    {:noreply, assign(socket, subscription_id: subscription_id, pending?: false, error: nil)}
+  def handle_info(
+        {:monitor_enabled, _id, request_id, subscription_id},
+        %{assigns: %{pending_request_id: request_id}} = socket
+      ) do
+    {:noreply,
+     assign(socket,
+       subscription_id: subscription_id,
+       pending?: false,
+       pending_request_id: nil,
+       error: nil
+     )}
   end
+
+  def handle_info({:monitor_enabled, _id, _request_id, _subscription_id}, socket),
+    do: {:noreply, socket}
+
+  def handle_info(
+        {:monitor_failed, _id, request_id, error},
+        %{assigns: %{pending_request_id: request_id}} = socket
+      ) do
+    {:noreply, assign(socket, pending?: false, pending_request_id: nil, error: describe(error))}
+  end
+
+  def handle_info({:monitor_failed, _id, _request_id, _error}, socket),
+    do: {:noreply, socket}
 
   def handle_info({:monitor_update, _id, subscription_id, subscription}, socket) do
     if subscription_id == socket.assigns.subscription_id do
@@ -101,7 +128,13 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
 
   def handle_info({:monitor_ended, _id, subscription_id}, socket) do
     if subscription_id == socket.assigns.subscription_id do
-      {:noreply, assign(socket, subscription_id: nil, subscription: nil, pending?: false)}
+      {:noreply,
+       assign(socket,
+         subscription_id: nil,
+         subscription: nil,
+         pending?: false,
+         pending_request_id: nil
+       )}
     else
       {:noreply, socket}
     end
@@ -113,7 +146,12 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
       # dead and a fresh enable has to be an explicit act.
       {:noreply,
        socket
-       |> assign(subscription_id: nil, subscription: nil, pending?: false)
+       |> assign(
+         subscription_id: nil,
+         subscription: nil,
+         pending?: false,
+         pending_request_id: nil
+       )
        |> assign(:error, "connection lost — the subscription ended with it")}
     else
       {:noreply, socket}
@@ -136,11 +174,18 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
     :ok
   end
 
-  defp disable(%{assigns: %{subscription_id: nil}} = socket), do: assign(socket, :pending?, false)
+  defp disable(%{assigns: %{subscription_id: nil}} = socket),
+    do: assign(socket, pending?: false, pending_request_id: nil)
 
   defp disable(socket) do
     Connection.disable_monitor(socket.assigns.connection.id, socket.assigns.subscription_id)
-    assign(socket, subscription_id: nil, subscription: nil, pending?: false)
+
+    assign(socket,
+      subscription_id: nil,
+      subscription: nil,
+      pending?: false,
+      pending_request_id: nil
+    )
   end
 
   defp monitor_form(params \\ %{}) do
@@ -165,6 +210,7 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
 
   defp describe(:not_ready), do: "the connection is not ready"
   defp describe(:not_connected), do: "the socket is closed"
+  defp describe(%{} = error), do: "#{error["kind"] || "request"}/#{error["code"] || "unknown"}"
   defp describe(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp describe(reason), do: inspect(reason)
 
@@ -183,7 +229,7 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
         <.term_window title="live" status={status_label(@subscription, @subscription_id)}>
           <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
             <.metric
-              :for={field <- @fields}
+              :for={field <- @summary_fields}
               label={field}
               value={metric_value(@subscription, field)}
               unit={metric_unit(field)}
@@ -192,7 +238,7 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
 
           <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <.spark
-              :for={field <- @fields}
+              :for={field <- @summary_fields}
               samples={series(@subscription, field)}
               label={"#{field} over time"}
             />
@@ -234,6 +280,34 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
           </p>
         </.term_window>
       </div>
+
+      <div class="mt-6">
+        <.term_window title="OTP process snapshot" status={snapshot_status(@subscription)}>
+          <p :if={is_nil(@subscription)} class="text-[0.75rem] leading-6 t-dim">
+            Enable live monitoring to inspect all {length(@fields)} publication-safe fields.
+          </p>
+
+          <div :if={@subscription} class="grid gap-x-8 md:grid-cols-2 xl:grid-cols-3">
+            <div
+              :for={{field, value} <- snapshot_rows(@subscription)}
+              class="grid grid-cols-[9.5rem_1fr] gap-3 border-b border-[var(--term-border)] py-2 text-[0.7rem]"
+            >
+              <span class="break-all t-faint">{field}</span>
+              <code class="break-all whitespace-pre-wrap t-body">{snapshot_value(value)}</code>
+            </div>
+          </div>
+
+          <div :if={@subscription} class="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-[0.68rem] t-faint">
+            <span>subject: {@subscription.subject}</span>
+            <span>sequence: {@subscription.sequence}</span>
+            <span>dropped updates: {@subscription.dropped}</span>
+            <span>sampled: {sampled_at(@subscription)}</span>
+            <span :if={truncated_fields(@subscription) != []}>
+              truncated: {Enum.join(truncated_fields(@subscription), ", ")}
+            </span>
+          </div>
+        </.term_window>
+      </div>
     </Layouts.app>
     """
   end
@@ -271,6 +345,32 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
   defp subscription_error(%{status: {:error, label}}), do: "monitor.error #{label}"
   defp subscription_error(%{status: :expired}), do: "subscription expired — enable it again"
   defp subscription_error(_subscription), do: nil
+
+  defp snapshot_rows(subscription), do: Enum.sort_by(subscription.latest, &elem(&1, 0))
+
+  defp snapshot_value(nil), do: "—"
+  defp snapshot_value(value) when is_binary(value), do: value
+  defp snapshot_value(value), do: inspect(value, pretty: true, limit: 50)
+
+  defp snapshot_status(nil), do: "not sampled"
+  defp snapshot_status(subscription), do: "#{map_size(subscription.latest)} fields"
+
+  defp sampled_at(subscription) do
+    case Map.get(subscription.snapshot, "sampled_at_unix_ms") do
+      value when is_integer(value) ->
+        value |> DateTime.from_unix!(:millisecond) |> Calendar.strftime("%H:%M:%S.%f")
+
+      _other ->
+        "—"
+    end
+  end
+
+  defp truncated_fields(subscription) do
+    case Map.get(subscription.snapshot, "truncated_fields", []) do
+      values when is_list(values) -> values
+      _other -> []
+    end
+  end
 
   defp format_bytes(bytes) when bytes >= 1_048_576,
     do: :erlang.float_to_binary(bytes / 1_048_576, decimals: 1) <> " MB"

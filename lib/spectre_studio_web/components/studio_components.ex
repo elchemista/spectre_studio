@@ -272,8 +272,9 @@ defmodule SpectreStudioWeb.StudioComponents do
   @doc """
   Renders the tab strip of an Agent panel.
 
-  A tab the operator is not authorised for is not rendered at all — not rendered
-  disabled. An action that cannot be taken should not be present in the document.
+  Unavailable capabilities remain visible as disabled tabs. Studio is an
+  operator console: showing the locked surface explains which host grant is
+  missing without presenting an actionable link.
   """
   attr :class, :any, default: nil
 
@@ -281,6 +282,8 @@ defmodule SpectreStudioWeb.StudioComponents do
     attr :patch, :any
     attr :navigate, :any
     attr :selected, :boolean
+    attr :disabled, :boolean
+    attr :title, :string
   end
 
   def tabs(assigns) do
@@ -289,7 +292,17 @@ defmodule SpectreStudioWeb.StudioComponents do
       <span class="term-tabs__sep" aria-hidden="true">[</span>
       <%= for {tab, index} <- Enum.with_index(@tab) do %>
         <span :if={index > 0} class="term-tabs__sep" aria-hidden="true">|</span>
+        <span
+          :if={tab[:disabled]}
+          class="term-tab cursor-not-allowed opacity-40"
+          role="tab"
+          aria-disabled="true"
+          title={tab[:title]}
+        >
+          {render_slot(tab)} ↯
+        </span>
         <.link
+          :if={!tab[:disabled]}
           class="term-tab"
           role="tab"
           aria-selected={to_string(!!tab[:selected])}

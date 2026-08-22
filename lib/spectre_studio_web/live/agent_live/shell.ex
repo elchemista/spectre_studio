@@ -30,10 +30,11 @@ defmodule SpectreStudioWeb.AgentLive.Shell do
       label: "semantic cache",
       capability: {:any, [:semantic_cache_read, :semantic_cache_promote]}
     },
+    %{key: :journal, label: "journal / turns", capability: :ledger_read},
     %{
       key: :evolve,
       label: "skills / morph",
-      capability: {:any, [:skill_create, :morph_create]}
+      capability: {:any, [:skill_read, :morph_create]}
     },
     %{key: :messages, label: "messages", capability: :message_send},
     %{key: :events, label: "events", capability: nil}
@@ -108,13 +109,32 @@ defmodule SpectreStudioWeb.AgentLive.Shell do
     if tab == :overview, do: base, else: base <> "/#{tab}"
   end
 
-  @doc "The tabs this connection's grants actually allow."
+  @doc "All known Agent tabs annotated with their current availability."
   @spec visible_tabs(map()) :: [map()]
   def visible_tabs(connection) do
-    Enum.filter(@tabs, fn
-      %{capability: nil} -> true
-      %{capability: capability} -> permitted?(connection.manifest, capability)
+    Enum.map(@tabs, fn tab ->
+      available? = is_nil(tab.capability) or permitted?(connection.manifest, tab.capability)
+
+      tab
+      |> Map.put(:available?, available?)
+      |> Map.put(:missing_scopes, missing_scopes(connection.manifest, tab.capability))
     end)
+  end
+
+  @spec missing_scopes(Manifest.t() | nil, nil | Scopes.capability() | {:any, list()}) ::
+          [String.t()]
+  defp missing_scopes(_manifest, nil), do: []
+
+  defp missing_scopes(manifest, {:any, capabilities}) do
+    if Scopes.any?(manifest, capabilities) do
+      []
+    else
+      capabilities |> Enum.flat_map(&Scopes.required_scopes/1) |> Enum.uniq()
+    end
+  end
+
+  defp missing_scopes(manifest, capability) do
+    if Scopes.can?(manifest, capability), do: [], else: Scopes.required_scopes(capability)
   end
 
   @spec permitted?(Manifest.t() | nil, Scopes.capability() | {:any, [Scopes.capability()]}) ::
@@ -147,6 +167,8 @@ defmodule SpectreStudioWeb.AgentLive.Shell do
           :for={tab <- @tabs}
           navigate={tab_path(@connection, @agent, tab.key)}
           selected={@tab == tab.key}
+          disabled={!tab.available?}
+          title={missing_title(tab.missing_scopes)}
         >
           {tab.label}
         </:tab>
@@ -154,4 +176,8 @@ defmodule SpectreStudioWeb.AgentLive.Shell do
     </div>
     """
   end
+
+  @spec missing_title([String.t()]) :: String.t() | nil
+  defp missing_title([]), do: nil
+  defp missing_title(scopes), do: "not granted: " <> Enum.join(scopes, ", ")
 end

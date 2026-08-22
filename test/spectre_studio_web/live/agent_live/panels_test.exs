@@ -78,6 +78,9 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
       assert html =~ "Researcher"
       assert html =~ "no mailbox contents"
       assert html =~ "belong to Ledger"
+      assert html =~ "capability matrix"
+      assert html =~ "Semantic cache · inspect"
+      assert html =~ "locked"
     end
 
     test "monitoring starts only when asked, and streams once it does", %{conn: conn, spec: spec} do
@@ -85,6 +88,7 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
 
       assert html =~ "not streaming"
       assert html =~ "enable live"
+      assert html =~ "inspect all 19 publication-safe fields"
 
       html =
         live
@@ -105,6 +109,8 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
       assert html =~ "disable live"
       assert html =~ "kB"
       assert html =~ "term-spark"
+      assert html =~ "OTP process snapshot"
+      assert html =~ "message_queue_len"
     end
 
     test "a subject is required to select an Instance", %{conn: conn, spec: spec} do
@@ -192,11 +198,12 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
       {:ok, spec: connected_endpoint(scopes: ["agent.runtime.read"])}
     end
 
-    test "the live tab is absent, not disabled", %{conn: conn, spec: spec} do
+    test "the live tab remains visible but explains that it is locked", %{conn: conn, spec: spec} do
       {:ok, _live, html} = live(conn, agent_path(spec))
 
       assert html =~ "overview"
-      refute html =~ ">live<"
+      assert html =~ ~s(aria-disabled="true")
+      assert html =~ "not granted: agent.runtime.read, agent.runtime.stream"
       # The overview explains the absence instead of leaving it a mystery.
       assert html =~ "panels withheld by this connection"
       assert html =~ "agent.runtime.stream"
@@ -246,6 +253,64 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
     end
   end
 
+  describe "when Pulse rejects the requested Instance" do
+    setup do
+      scopes = [
+        "agent.runtime.read",
+        "agent.runtime.stream",
+        "agent.operations.read",
+        "agent.operations.stream"
+      ]
+
+      {:ok,
+       spec:
+         connected_endpoint(
+           scopes: scopes,
+           reject_subject: "missing-instance"
+         )}
+    end
+
+    test "the runtime panel leaves enabling and displays the correlated error", %{
+      conn: conn,
+      spec: spec
+    } do
+      {:ok, live, _html} = live(conn, agent_path(spec, :monitor))
+
+      live
+      |> form("#monitor-form", %{
+        "monitor" => %{"subject" => "missing-instance", "interval_ms" => "1000"}
+      })
+      |> render_submit()
+
+      assert_eventually(live, "routing/instance_not_found")
+      html = render(live)
+      refute html =~ "enabling…"
+      assert html =~ "enable live"
+    end
+
+    test "the Work/Vigil panel leaves enabling and displays the correlated error", %{
+      conn: conn,
+      spec: spec
+    } do
+      {:ok, live, _html} = live(conn, agent_path(spec, :operations))
+
+      live
+      |> form("#operations-form", %{
+        "operations" => %{
+          "subject" => "missing-instance",
+          "kinds" => "all",
+          "interval_ms" => "1000"
+        }
+      })
+      |> render_submit()
+
+      assert_eventually(live, "routing/instance_not_found")
+      html = render(live)
+      refute html =~ "enabling…"
+      assert html =~ "watch Work / Vigil"
+    end
+  end
+
   describe "with semantic-cache review scopes" do
     setup do
       scopes = ["agent.semantic_cache.read", "agent.semantic_cache.promote"]
@@ -272,31 +337,47 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
     end
   end
 
+  describe "with Journal access" do
+    setup do
+      {:ok, spec: connected_endpoint(scopes: ["ledger.read"])}
+    end
+
+    test "loads and renders bounded persisted turns", %{conn: conn, spec: spec} do
+      {:ok, live, html} = live(conn, agent_path(spec, :journal))
+      assert html =~ "turn journal"
+      assert html =~ "no turns loaded"
+
+      live
+      |> form("#journal-form", %{
+        "journal" => %{"subject" => "conversation-42", "limit" => "50"}
+      })
+      |> render_submit()
+
+      assert_eventually(live, "show the latest article")
+      html = render(live)
+      assert html =~ "The latest article is Runtime Safety."
+      assert html =~ "state revision 7"
+      assert html =~ "2 turns"
+    end
+  end
+
   describe "with Skill and Morph scopes" do
     setup do
-      scopes = ["spectre.skill.runtime.mount", "spectre.morph.propose"]
+      scopes = ["spectre.skill.read", "spectre.morph.propose"]
       {:ok, spec: connected_endpoint(scopes: scopes)}
     end
 
-    test "mounts a runtime Skill and creates an evaluated Morph proposal", %{
+    test "lists Skills and creates an evaluated Morph proposal", %{
       conn: conn,
       spec: spec
     } do
       {:ok, live, html} = live(conn, agent_path(spec, :evolve))
-      assert html =~ "create + mount Skill"
+      assert html =~ "Skill inventory"
       assert html =~ "create + evaluate proposal"
 
-      live
-      |> form("#skill-form", %{
-        "skill" => %{
-          "subject" => "account-1",
-          "mount_id" => "refunds",
-          "definition" => ~s({"id":"refunds","declared_version":1})
-        }
-      })
-      |> render_submit()
-
-      assert_eventually(live, "mounted")
+      live |> element("button", "refresh Skills") |> render_click()
+      assert_eventually(live, "reader")
+      assert render(live) =~ "refunds"
 
       live
       |> form("#morph-form", %{

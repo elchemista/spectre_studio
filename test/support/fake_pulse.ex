@@ -173,6 +173,33 @@ defmodule SpectreStudio.FakePulse do
     def terminate(_reason, _state), do: :ok
 
     defp enable(kind, frame, state) do
+      subject = Map.get(frame, "subject")
+
+      cond do
+        subject == Keyword.get(state.opts, :reject_subject) -> reject_enable(kind, frame, state)
+        subject == Keyword.get(state.opts, :ignore_subject) -> {:ok, state}
+        true -> accept_enable(kind, frame, state)
+      end
+    end
+
+    defp reject_enable(kind, frame, state) do
+      response =
+        encode(%{
+          "type" => "error",
+          "error" => %{
+            "kind" => "routing",
+            "outcome" => "not_sent",
+            "code" => "instance_not_found",
+            "message_id" => nil,
+            "monitor" => Atom.to_string(kind),
+            "request_id" => Map.get(frame, "request_id")
+          }
+        })
+
+      {:push, {:text, response}, state}
+    end
+
+    defp accept_enable(kind, frame, state) do
       counter = state.counter + 1
       subscription_id = "sub-#{counter}"
       interval = Map.get(frame, "interval_ms", 1000)
@@ -295,11 +322,51 @@ defmodule SpectreStudio.FakePulse do
       }
     end
 
-    defp bridge_data("studio.skill.mount", envelope) do
+    defp bridge_data("studio.journal.turns", envelope) do
+      subject = get_in(envelope, ["payload", "data", "subject"])
+
       %{
-        "status" => "mounted",
-        "mount_id" => get_in(envelope, ["payload", "data", "mount_id"]),
-        "revision" => 1
+        "subject" => subject,
+        "revision" => 7,
+        "count" => 2,
+        "turns" => [
+          %{
+            "at" => "2026-08-22T12:00:00Z",
+            "user" => "show the latest article",
+            "assistant" => "The latest article is Runtime Safety.",
+            "route" => "read_latest",
+            "events" => ["routed", "completed"]
+          },
+          %{
+            "at" => "2026-08-22T12:01:00Z",
+            "user" => "summarize it",
+            "assistant" => "It explains bounded Agent operations.",
+            "route" => "summarize",
+            "events" => ["completed"]
+          }
+        ]
+      }
+    end
+
+    defp bridge_data("studio.skills.list", _envelope) do
+      %{
+        "count" => 2,
+        "skills" => [
+          %{
+            "id" => "reader",
+            "module" => "SpectreStudio.Fake.Reader",
+            "definition_id" => "reader",
+            "definition_version" => 3,
+            "origin" => "compiled"
+          },
+          %{
+            "id" => "refunds",
+            "module" => "runtime",
+            "definition_id" => "refunds",
+            "definition_version" => 1,
+            "origin" => "runtime"
+          }
+        ]
       }
     end
 

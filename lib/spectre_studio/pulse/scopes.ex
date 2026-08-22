@@ -8,9 +8,9 @@ defmodule SpectreStudio.Pulse.Scopes do
   Studio treats every grant as a statement of intent and never infers a
   capability from silence.
 
-  The UI rule that follows from this: an action Studio is not authorised for is
-  not rendered at all. Rendering it disabled would tell the operator the action
-  exists and they are failing to use it, which is a different and wrong message.
+  Unavailable capabilities remain visible as locked in the UI. This lets an
+  operator distinguish a missing grant from a missing implementation without
+  turning the locked control into an executable action.
   """
 
   alias SpectreStudio.Pulse.Manifest
@@ -23,6 +23,7 @@ defmodule SpectreStudio.Pulse.Scopes do
     message_send: ["agent.message.send"],
     semantic_cache_read: ["agent.semantic_cache.read"],
     semantic_cache_promote: ["agent.semantic_cache.promote"],
+    skill_read: ["spectre.skill.read"],
     skill_create: ["spectre.skill.runtime.mount"],
     morph_create: ["spectre.morph.propose"],
     control: ["agent.control"],
@@ -38,6 +39,7 @@ defmodule SpectreStudio.Pulse.Scopes do
           | :message_send
           | :semantic_cache_read
           | :semantic_cache_promote
+          | :skill_read
           | :skill_create
           | :morph_create
           | :control

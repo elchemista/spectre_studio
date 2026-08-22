@@ -8,16 +8,10 @@ defmodule SpectreStudioWeb.CoreComponents do
   with doc strings and declarative assigns. You may customize and style
   them in any way you want, based on your application growth and needs.
 
-  The foundation for styling is Tailwind CSS, a utility-first CSS framework,
-  augmented with daisyUI, a Tailwind CSS plugin that provides UI components
-  and themes. Here are useful references:
-
-    * [daisyUI](https://daisyui.com/docs/intro/) - a good place to get
-      started and see the available components.
-
-    * [Tailwind CSS](https://tailwindcss.com) - the foundational framework
-      we build on. You will use it for layout, sizing, flexbox, grid, and
-      spacing.
+  The foundation for styling is Tailwind CSS with project-owned components
+  and theme rules in `assets/css/app.css`. The visual language, its tokens and
+  the rules these components obey are specified in `docs/UI.md`; domain widgets
+  built on top of them live in `SpectreStudioWeb.StudioComponents`.
 
     * [Heroicons](https://heroicons.com) - see `icon/1` for usage.
 
@@ -29,7 +23,69 @@ defmodule SpectreStudioWeb.CoreComponents do
   use Phoenix.Component
   use Gettext, backend: SpectreStudioWeb.Gettext
 
+  alias Phoenix.HTML.Form
   alias Phoenix.LiveView.JS
+
+  @doc """
+  Renders a terminal window frame.
+
+  The whole UI is built out of these instead of generic cards: a title bar with
+  the traffic-light dots, an optional right-aligned status and the body slot.
+
+  ## Examples
+
+      <.term_window title="~/posts/hello.md" status="4 min">
+        content
+      </.term_window>
+  """
+  attr :id, :string, default: nil
+  attr :title, :string, default: nil
+  attr :status, :string, default: nil, doc: "right aligned text inside the title bar"
+  attr :class, :any, default: nil
+  attr :body_class, :any, default: nil
+  attr :interactive, :boolean, default: false, doc: "adds the hover treatment for linked windows"
+  attr :rest, :global
+
+  slot :bar, doc: "replaces the whole title bar content, dots aside"
+  slot :inner_block, required: true
+
+  def term_window(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class={["term-window", @interactive && "term-window--link", @class]}
+      {@rest}
+    >
+      <div class="term-bar">
+        <span class="term-dots" aria-hidden="true">
+          <span class="term-dot"></span>
+          <span class="term-dot"></span>
+          <span class="term-dot"></span>
+        </span>
+        <%= if @bar != [] do %>
+          {render_slot(@bar)}
+        <% else %>
+          <span class="term-title">{@title}</span>
+          <span :if={@status} class="ml-auto flex-none t-faint">{@status}</span>
+        <% end %>
+      </div>
+      <div class={["term-body", @body_class]}>
+        {render_slot(@inner_block)}
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders a blinking terminal cursor.
+  """
+  attr :class, :any, default: nil
+
+  def cursor(assigns) do
+    ~H"""
+    <span class={["term-cursor", @class]} aria-hidden="true"></span>
+    """
+  end
 
   @doc """
   Renders flash notices.
@@ -61,26 +117,41 @@ defmodule SpectreStudioWeb.CoreComponents do
     <div
       :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
       id={@id}
-      phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
       role="alert"
-      class="toast toast-top toast-end z-50"
+      data-flash
+      class={[
+        "term-flash term-window term-window--raised pointer-events-auto w-full",
+        @kind == :error && "border-[color:var(--line-strong)]"
+      ]}
       {@rest}
     >
-      <div class={[
-        "alert w-80 sm:w-96 max-w-80 sm:max-w-96 text-wrap",
-        @kind == :info && "alert-info",
-        @kind == :error && "alert-error"
-      ]}>
-        <.icon :if={@kind == :info} name="hero-information-circle" class="size-5 shrink-0" />
-        <.icon :if={@kind == :error} name="hero-exclamation-circle" class="size-5 shrink-0" />
-        <div>
-          <p :if={@title} class="font-semibold">{@title}</p>
-          <p>{msg}</p>
-        </div>
-        <div class="flex-1" />
-        <button type="button" class="group self-start cursor-pointer" aria-label={gettext("close")}>
-          <.icon name="hero-x-mark" class="size-5 opacity-40 group-hover:opacity-70" />
+      <div class="term-bar">
+        <span class="term-dots" aria-hidden="true">
+          <span class="term-dot"></span>
+          <span class="term-dot"></span>
+          <span class="term-dot"></span>
+        </span>
+        <span class="term-title">
+          {if(@kind == :error, do: "stderr", else: "stdout")}
+        </span>
+        <button
+          type="button"
+          data-flash-dismiss
+          phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
+          class="ml-auto flex-none cursor-pointer t-faint transition hover:t-strong"
+          aria-label={gettext("close")}
+        >
+          [x]
         </button>
+      </div>
+      <div class="term-body flex items-start gap-2.5 py-3 text-[0.78rem] leading-6">
+        <span class="flex-none t-faint" aria-hidden="true">
+          {if(@kind == :error, do: "!", else: "›")}
+        </span>
+        <div class="min-w-0">
+          <p :if={@title} class="font-bold t-strong">{@title}</p>
+          <p class="break-words t-body">{msg}</p>
+        </div>
       </div>
     </div>
     """
@@ -95,17 +166,17 @@ defmodule SpectreStudioWeb.CoreComponents do
       <.button phx-click="go" variant="primary">Send!</.button>
       <.button navigate={~p"/"}>Home</.button>
   """
-  attr :rest, :global, include: ~w(href navigate patch method download name value disabled)
+  attr :rest, :global, include: ~w(href navigate patch method type download name value disabled)
   attr :class, :any
   attr :variant, :string, values: ~w(primary)
   slot :inner_block, required: true
 
   def button(%{rest: rest} = assigns) do
-    variants = %{"primary" => "btn-primary", nil => "btn-primary btn-soft"}
+    variants = %{"primary" => "term-btn--primary", nil => nil}
 
     assigns =
       assign_new(assigns, :class, fn ->
-        ["btn", Map.fetch!(variants, assigns[:variant])]
+        ["term-btn", Map.fetch!(variants, assigns[:variant])]
       end)
 
     if rest[:href] || rest[:navigate] || rest[:patch] do
@@ -208,12 +279,12 @@ defmodule SpectreStudioWeb.CoreComponents do
   def input(%{type: "checkbox"} = assigns) do
     assigns =
       assign_new(assigns, :checked, fn ->
-        Phoenix.HTML.Form.normalize_value("checkbox", assigns[:value])
+        Form.normalize_value("checkbox", assigns[:value])
       end)
 
     ~H"""
-    <div class="fieldset mb-2">
-      <label for={@id}>
+    <div class="mb-4">
+      <label for={@id} class={@class || "term-check"}>
         <input
           type="hidden"
           name={@name}
@@ -221,17 +292,9 @@ defmodule SpectreStudioWeb.CoreComponents do
           disabled={@rest[:disabled]}
           form={@rest[:form]}
         />
-        <span class="label">
-          <input
-            type="checkbox"
-            id={@id}
-            name={@name}
-            value="true"
-            checked={@checked}
-            class={@class || "checkbox checkbox-sm"}
-            {@rest}
-          />{@label}
-        </span>
+        <input type="checkbox" id={@id} name={@name} value="true" checked={@checked} {@rest} />
+        <span class="term-check__box" aria-hidden="true"></span>
+        <span>{@label}</span>
       </label>
       <.error :for={msg <- @errors}>{msg}</.error>
     </div>
@@ -240,19 +303,24 @@ defmodule SpectreStudioWeb.CoreComponents do
 
   def input(%{type: "select"} = assigns) do
     ~H"""
-    <div class="fieldset mb-2">
+    <div class="mb-4">
       <label for={@id}>
-        <span :if={@label} class="label mb-1">{@label}</span>
-        <select
-          id={@id}
-          name={@name}
-          class={[@class || "w-full select", @errors != [] && (@error_class || "select-error")]}
-          multiple={@multiple}
-          {@rest}
-        >
-          <option :if={@prompt} value="">{@prompt}</option>
-          {Phoenix.HTML.Form.options_for_select(@options, @value)}
-        </select>
+        <span :if={@label} class="term-label">{@label}</span>
+        <span class="term-select">
+          <select
+            id={@id}
+            name={@name}
+            class={[
+              @class || "term-field",
+              @errors != [] && (@error_class || "term-field--error")
+            ]}
+            multiple={@multiple}
+            {@rest}
+          >
+            <option :if={@prompt} value="">{@prompt}</option>
+            {Phoenix.HTML.Form.options_for_select(@options, @value)}
+          </select>
+        </span>
       </label>
       <.error :for={msg <- @errors}>{msg}</.error>
     </div>
@@ -261,15 +329,15 @@ defmodule SpectreStudioWeb.CoreComponents do
 
   def input(%{type: "textarea"} = assigns) do
     ~H"""
-    <div class="fieldset mb-2">
+    <div class="mb-4">
       <label for={@id}>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class="term-label">{@label}</span>
         <textarea
           id={@id}
           name={@name}
           class={[
-            @class || "w-full textarea",
-            @errors != [] && (@error_class || "textarea-error")
+            @class || "term-field min-h-32",
+            @errors != [] && (@error_class || "term-field--error")
           ]}
           {@rest}
         >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
@@ -282,17 +350,17 @@ defmodule SpectreStudioWeb.CoreComponents do
   # All other inputs text, datetime-local, url, password, etc. are handled here...
   def input(assigns) do
     ~H"""
-    <div class="fieldset mb-2">
+    <div class="mb-4">
       <label for={@id}>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class="term-label">{@label}</span>
         <input
           type={@type}
           name={@name}
           id={@id}
           value={Phoenix.HTML.Form.normalize_value(@type, @value)}
           class={[
-            @class || "w-full input",
-            @errors != [] && (@error_class || "input-error")
+            @class || "term-field",
+            @errors != [] && (@error_class || "term-field--error")
           ]}
           {@rest}
         />
@@ -305,8 +373,8 @@ defmodule SpectreStudioWeb.CoreComponents do
   # Helper used by inputs to generate form errors
   defp error(assigns) do
     ~H"""
-    <p class="mt-1.5 flex gap-2 items-center text-sm text-error">
-      <.icon name="hero-exclamation-circle" class="size-5" />
+    <p class="mt-1.5 flex items-start gap-2 text-[0.72rem] leading-5 t-strong">
+      <span class="t-faint" aria-hidden="true">!</span>
       {render_slot(@inner_block)}
     </p>
     """
@@ -321,16 +389,19 @@ defmodule SpectreStudioWeb.CoreComponents do
 
   def header(assigns) do
     ~H"""
-    <header class={[@actions != [] && "flex items-center justify-between gap-6", "pb-4"]}>
-      <div>
-        <h1 class="text-lg font-semibold leading-8">
+    <header class={[
+      @actions != [] && "flex items-end justify-between gap-6",
+      "border-b border-dashed border-[color:var(--line)] pb-4"
+    ]}>
+      <div class="min-w-0">
+        <h1 class="text-lg font-bold tracking-tight t-strong">
           {render_slot(@inner_block)}
         </h1>
-        <p :if={@subtitle != []} class="text-sm text-base-content/70">
-          {render_slot(@subtitle)}
+        <p :if={@subtitle != []} class="mt-1.5 text-[0.78rem] leading-6 t-faint">
+          <span aria-hidden="true">// </span>{render_slot(@subtitle)}
         </p>
       </div>
-      <div class="flex-none">{render_slot(@actions)}</div>
+      <div :if={@actions != []} class="flex-none">{render_slot(@actions)}</div>
     </header>
     """
   end
@@ -367,34 +438,36 @@ defmodule SpectreStudioWeb.CoreComponents do
       end
 
     ~H"""
-    <table class="table table-zebra">
-      <thead>
-        <tr>
-          <th :for={col <- @col}>{col[:label]}</th>
-          <th :if={@action != []}>
-            <span class="sr-only">{gettext("Actions")}</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody id={@id} phx-update={is_struct(@rows, Phoenix.LiveView.LiveStream) && "stream"}>
-        <tr :for={row <- @rows} id={@row_id && @row_id.(row)}>
-          <td
-            :for={col <- @col}
-            phx-click={@row_click && @row_click.(row)}
-            class={@row_click && "hover:cursor-pointer"}
-          >
-            {render_slot(col, @row_item.(row))}
-          </td>
-          <td :if={@action != []} class="w-0 font-semibold">
-            <div class="flex gap-4">
-              <%= for action <- @action do %>
-                {render_slot(action, @row_item.(row))}
-              <% end %>
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="w-full overflow-x-auto">
+      <table class="term-table">
+        <thead>
+          <tr>
+            <th :for={col <- @col}>{col[:label]}</th>
+            <th :if={@action != []}>
+              <span class="sr-only">{gettext("Actions")}</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody id={@id} phx-update={is_struct(@rows, Phoenix.LiveView.LiveStream) && "stream"}>
+          <tr :for={row <- @rows} id={@row_id && @row_id.(row)}>
+            <td
+              :for={col <- @col}
+              phx-click={@row_click && @row_click.(row)}
+              class={@row_click && "cursor-pointer"}
+            >
+              {render_slot(col, @row_item.(row))}
+            </td>
+            <td :if={@action != []} class="w-0 whitespace-nowrap">
+              <div class="flex gap-3 t-dim">
+                <%= for action <- @action do %>
+                  {render_slot(action, @row_item.(row))}
+                <% end %>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     """
   end
 
@@ -414,12 +487,10 @@ defmodule SpectreStudioWeb.CoreComponents do
 
   def list(assigns) do
     ~H"""
-    <ul class="list">
-      <li :for={item <- @item} class="list-row">
-        <div class="list-col-grow">
-          <div class="font-bold">{item.title}</div>
-          <div>{render_slot(item)}</div>
-        </div>
+    <ul class="term-list">
+      <li :for={item <- @item}>
+        <span class="term-list__key">{item.title}</span>
+        <span class="term-list__value">{render_slot(item)}</span>
       </li>
     </ul>
     """

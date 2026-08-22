@@ -1,0 +1,176 @@
+defmodule SpectreStudio.Pulse.ConnectionTest do
+  use ExUnit.Case, async: false
+
+  alias SpectreStudio.FakePulse
+  alias SpectreStudio.Pulse.Connection
+  alias SpectreStudio.Pulse.ConnectionSpec
+  alias SpectreStudio.Pulse.Events
+
+  @address "spectre://acme/researcher"
+
+  defp start_endpoint(opts \\ []) do
+    {:ok, port, pid} = FakePulse.start(opts)
+    on_exit(fn -> stop_endpoint(pid) end)
+    port
+  end
+
+  # Bandit's supervisor exits with :shutdown rather than :normal, so it is taken
+  # down by signal and waited for, instead of through Supervisor.stop/1.
+  defp stop_endpoint(pid) do
+    if Process.alive?(pid) do
+      ref = Process.monitor(pid)
+      Process.exit(pid, :shutdown)
+
+      receive do
+        {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+      after
+        2_000 -> :ok
+      end
+    end
+  end
+
+  defp start_connection(port, token \\ "good-token") do
+    {:ok, spec} =
+      ConnectionSpec.new(%{
+        "label" => "test-#{System.unique_integer([:positive])}",
+        "url" => FakePulse.url(port),
+        "token" => token
+      })
+
+    :ok = Events.subscribe(Events.connection_topic(spec.id))
+    start_supervised!({Connection, spec: spec}, id: {:connection, spec.id})
+    spec
+  end
+
+  describe "connecting" do
+    test "reaches ready once the manifest arrives" do
+      spec = start_connection(start_endpoint())
+      Connection.connect(spec.id)
+
+      assert_receive {:connection_status, _id, :connecting}, 2_000
+      assert_receive {:connection_status, _id, :authenticating}, 2_000
+      assert_receive {:connection_status, _id, :ready}, 2_000
+
+      assert {:ok, snapshot} = Connection.snapshot(spec.id)
+      assert snapshot.manifest.principal_id == "operator-42"
+      assert [agent] = snapshot.manifest.agents
+      assert agent.address == @address
+    end
+
+    test "a rejected credential is terminal, not retried forever" do
+      spec = start_connection(start_endpoint(), "wrong-token")
+      Connection.connect(spec.id)
+
+      assert_receive {:connection_status, _id, :connecting}, 2_000
+      assert_receive {:connection_status, _id, :error}, 5_000
+
+      assert {:ok, snapshot} = Connection.snapshot(spec.id)
+      assert snapshot.last_error == "authentication rejected"
+      # No reconnection is scheduled for a credential the host has rejected.
+      refute_receive {:connection_status, _id, :connecting}, 1_500
+    end
+  end
+
+  describe "runtime monitoring" do
+    setup do
+      spec = start_connection(start_endpoint())
+      Connection.connect(spec.id)
+      assert_receive {:connection_status, _id, :ready}, 2_000
+      {:ok, spec: spec}
+    end
+
+    test "enable, stream and disable", %{spec: spec} do
+      assert {:ok, _request_id} =
+               Connection.enable_monitor(spec.id,
+                 agent_address: @address,
+                 subject: "account-1",
+                 interval_ms: 250
+               )
+
+      assert_receive {:monitor_enabled, _id, _request, subscription_id}, 2_000
+      assert_receive {:monitor_update, _id, ^subscription_id, subscription}, 2_000
+
+      assert subscription.agent_address == @address
+      assert is_list(subscription.series["memory"])
+      assert Enum.all?(subscription.series["memory"], &(is_number(&1) or is_nil(&1)))
+
+      # Samples keep arriving until we say stop.
+      assert_receive {:monitor_update, _id, ^subscription_id, later}, 2_000
+      assert later.sequence > 0
+
+      assert :ok = Connection.disable_monitor(spec.id, subscription_id)
+      assert_receive {:monitor_ended, _id, ^subscription_id}, 2_000
+    end
+
+    test "refuses to enable before the connection is ready" do
+      {:ok, other} =
+        ConnectionSpec.new(%{"label" => "idle", "url" => "wss://nowhere/pulse"})
+
+      start_supervised!({Connection, spec: other}, id: {:connection, other.id})
+
+      assert {:error, :not_ready} =
+               Connection.enable_monitor(other.id,
+                 agent_address: @address,
+                 subject: "account-1"
+               )
+    end
+
+    test "a dead panel takes its subscription with it", %{spec: spec} do
+      test_pid = self()
+
+      owner =
+        spawn(fn ->
+          Connection.enable_monitor(spec.id,
+            agent_address: @address,
+            subject: "account-1",
+            interval_ms: 250
+          )
+
+          send(test_pid, :enabled)
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive :enabled, 2_000
+      assert_receive {:monitor_enabled, _id, _request, subscription_id}, 2_000
+
+      Process.exit(owner, :kill)
+
+      # Studio mirrors the guarantee Pulse gives on the host side: nobody is
+      # left streaming to a reader that no longer exists.
+      assert_receive {:monitor_ended, _id, ^subscription_id}, 2_000
+      assert {:ok, snapshot} = Connection.snapshot(spec.id)
+      assert snapshot.subscriptions == %{}
+    end
+  end
+
+  describe "envelopes" do
+    setup do
+      spec = start_connection(start_endpoint())
+      Connection.connect(spec.id)
+      assert_receive {:connection_status, _id, :ready}, 2_000
+      {:ok, spec: spec}
+    end
+
+    test "sends a validated envelope and correlates its receipt", %{spec: spec} do
+      assert {:ok, envelope} =
+               Connection.send_envelope(spec.id,
+                 to: @address,
+                 act: "request",
+                 payload_type: "research.perform",
+                 data: %{"text" => "hello"}
+               )
+
+      assert envelope["from"] == "spectre://studio/operator-42"
+
+      assert_receive {:envelope_sent, _id, _entry}, 2_000
+      assert_receive {:envelope_receipt, _id, entry}, 2_000
+      assert entry.id == envelope["id"]
+      assert entry.receipt["status"] == "accepted"
+    end
+
+    test "a malformed envelope never reaches the network", %{spec: spec} do
+      assert {:error, :invalid_payload_type} =
+               Connection.send_envelope(spec.id, to: @address, act: "inform", payload_type: "")
+    end
+  end
+end

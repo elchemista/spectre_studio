@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Studio.Secrets do
 
   @impl Mix.Task
   def run(_args) do
-    Mix.shell().info("""
+    Mix.Shell.IO.info("""
 
     STUDIO_VAULT_KEY='#{Base.encode64(:crypto.strong_rand_bytes(32))}'
 

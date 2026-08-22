@@ -18,9 +18,14 @@ defmodule SpectreStudio.Pulse.FrameTest do
                  ~s({"pulse":"connection","version":1,"type":"error","error":{"code":"boom"}})
                )
 
-      assert {:ok, {:monitor, "update", _frame}} =
+      assert {:ok, {:monitor, :runtime, "update", _frame}} =
                Frame.decode(
                  ~s({"pulse":"connection","version":1,"type":"agent.runtime.monitor.update"})
+               )
+
+      assert {:ok, {:monitor, :operations, "enabled", _frame}} =
+               Frame.decode(
+                 ~s({"pulse":"connection","version":1,"type":"agent.operations.monitor.enabled"})
                )
     end
 
@@ -61,6 +66,33 @@ defmodule SpectreStudio.Pulse.FrameTest do
     test "disable names a server-issued subscription" do
       {:ok, frame} = Frame.monitor_disable("sub-1")
       assert Jason.decode!(frame)["subscription_id"] == "sub-1"
+    end
+
+    test "Work and Vigil enable uses the operations frame and filters" do
+      {:ok, frame} =
+        Frame.monitor_enable(:operations,
+          request_id: "req-2",
+          agent_address: "spectre://acme/researcher",
+          subject: "account-1",
+          kinds: ["work", "vigil"],
+          include_terminal: true
+        )
+
+      decoded = Jason.decode!(frame)
+      assert decoded["type"] == "agent.operations.monitor.enable"
+      assert decoded["kinds"] == ["work", "vigil"]
+      assert decoded["include_terminal"] == true
+
+      {:ok, disable} = Frame.monitor_disable(:operations, "ops-1")
+      assert Jason.decode!(disable)["type"] == "agent.operations.monitor.disable"
+    end
+
+    test "missing required fields are errors, not exceptions" do
+      assert {:error, {:missing_monitor_field, :subject}} =
+               Frame.monitor_enable(:runtime,
+                 request_id: "req-1",
+                 agent_address: "spectre://acme/researcher"
+               )
     end
   end
 

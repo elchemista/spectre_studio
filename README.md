@@ -88,12 +88,26 @@ process behind one Agent Instance. It is not the Agent's history:
 - no memory records, prompts or model calls;
 - token totals belong to Ledger, not to this stream.
 
+The separate Work/Vigil panel uses Pulse's `agent.operations.*` protocol and
+shows publication-safe bounded loop views. It is still an observation stream,
+not durable operation history.
+
 Gaps are shown as gaps. A break in a sparkline means samples were never
 observed, and a gap in a Lab timeline means Spectre coalesced checkpoint writes
 — neither is interpolated, and neither is lost history.
 
 Monitoring is never on by default. It starts when an operator asks for it and
 stops when the panel closes, the tab changes, or the LiveView dies.
+
+When a host advertises the application bridge scopes, each Agent also gets:
+
+- a semantic-cache review queue with explicit **verify + promote**;
+- runtime Skill creation from a declarative JSON definition;
+- governed Morph Skill proposals that stop after evaluation, before approval
+  or activation.
+
+The bridge shapes and host responsibilities are in
+[`docs/STUDIO_BRIDGE.md`](docs/STUDIO_BRIDGE.md).
 
 ## Documentation
 
@@ -109,8 +123,10 @@ mix precommit   # compile --warnings-as-errors, deps.unlock, format, credo, test
 ```
 
 The test suite runs against `SpectreStudio.FakePulse`, a stand-in server that
-speaks the Pulse connection protocol, so the connection layer, the monitoring
-lifecycle and its failure paths are testable without a running Spectre system.
+speaks the current Pulse connection protocol, including OTP and Work/Vigil
+monitoring plus correlated application-bridge replies. The connection layer,
+monitoring lifecycle and failure paths are therefore testable without a running
+Spectre system.
 
 Each panel is its own LiveView. Lists that grow — endpoints, event logs, sent
 envelopes, bundles, timelines — are LiveView streams, and work that can take a

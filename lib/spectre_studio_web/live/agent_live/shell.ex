@@ -24,6 +24,17 @@ defmodule SpectreStudioWeb.AgentLive.Shell do
   @tabs [
     %{key: :overview, label: "overview", capability: nil},
     %{key: :monitor, label: "live", capability: :monitor_stream},
+    %{key: :operations, label: "work / vigil", capability: :operations_stream},
+    %{
+      key: :cache,
+      label: "semantic cache",
+      capability: {:any, [:semantic_cache_read, :semantic_cache_promote]}
+    },
+    %{
+      key: :evolve,
+      label: "skills / morph",
+      capability: {:any, [:skill_create, :morph_create]}
+    },
     %{key: :messages, label: "messages", capability: :message_send},
     %{key: :events, label: "events", capability: nil}
   ]
@@ -57,6 +68,24 @@ defmodule SpectreStudioWeb.AgentLive.Shell do
     end
   end
 
+  @doc "Loads one Agent panel and requires its declared Studio capability."
+  @spec mount_agent(LiveView.Socket.t(), map(), atom(), Scopes.capability() | {:any, list()}) ::
+          {:ok, LiveView.Socket.t()} | {:redirect, LiveView.Socket.t()}
+  def mount_agent(socket, params, tab, requirement) do
+    case mount_agent(socket, params, tab) do
+      {:ok, socket} ->
+        if permitted?(socket.assigns.connection.manifest, requirement) do
+          {:ok, socket}
+        else
+          id = socket.assigns.connection.id
+          {:redirect, redirect_to(socket, id, "This connection does not grant that panel.")}
+        end
+
+      {:redirect, socket} ->
+        {:redirect, socket}
+    end
+  end
+
   defp redirect_to(socket, id, message) do
     socket
     |> LiveView.put_flash(:error, message)
@@ -84,9 +113,14 @@ defmodule SpectreStudioWeb.AgentLive.Shell do
   def visible_tabs(connection) do
     Enum.filter(@tabs, fn
       %{capability: nil} -> true
-      %{capability: capability} -> Scopes.can?(connection.manifest, capability)
+      %{capability: capability} -> permitted?(connection.manifest, capability)
     end)
   end
+
+  @spec permitted?(Manifest.t() | nil, Scopes.capability() | {:any, [Scopes.capability()]}) ::
+          boolean()
+  defp permitted?(manifest, {:any, capabilities}), do: Scopes.any?(manifest, capabilities)
+  defp permitted?(manifest, capability), do: Scopes.can?(manifest, capability)
 
   attr :connection, :map, required: true
   attr :agent, :any, required: true

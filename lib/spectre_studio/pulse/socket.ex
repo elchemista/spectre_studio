@@ -21,6 +21,11 @@ defmodule SpectreStudio.Pulse.Socket do
 
   use GenServer, restart: :temporary
 
+  # mint_web_socket 1.0's success return is exercised by the integration suite,
+  # but its PLT narrows `new/4` to the upgrade-failure branch under OTP 29.
+  @dialyzer {:nowarn_function, handle_responses: 2}
+  @dialyzer {:nowarn_function, take_pending: 1}
+
   @handshake_timeout 15_000
 
   defstruct [
@@ -170,10 +175,15 @@ defmodule SpectreStudio.Pulse.Socket do
     handle_responses(rest, %{state | handshake_headers: headers})
   end
 
-  defp handle_responses([{:done, ref} | rest], %{request_ref: ref} = state) do
-    status = state.handshake_status
-    headers = state.handshake_headers || []
-
+  defp handle_responses(
+         [{:done, ref} | rest],
+         %{
+           request_ref: ref,
+           handshake_status: status,
+           handshake_headers: headers
+         } = state
+       )
+       when is_integer(status) and is_list(headers) do
     case Mint.WebSocket.new(state.conn, ref, status, headers) do
       {:ok, conn, websocket} ->
         send(state.owner, {:pulse_socket, self(), :open})
@@ -194,6 +204,9 @@ defmodule SpectreStudio.Pulse.Socket do
         {:stop, {:shutdown, upgrade_failure(status, reason)}, state}
     end
   end
+
+  defp handle_responses([{:done, ref} | _rest], %{request_ref: ref} = state),
+    do: {:stop, {:shutdown, :invalid_handshake_response}, state}
 
   defp handle_responses([{:data, ref, data} | rest], %{request_ref: ref, websocket: nil} = state) do
     handle_responses(rest, %{state | pending_data: [data | state.pending_data]})
@@ -250,9 +263,6 @@ defmodule SpectreStudio.Pulse.Socket do
   defp handle_frames([{:close, code, reason} | _rest], state) do
     {:stop, {:shutdown, {:closed, code, reason}}, state}
   end
-
-  defp handle_frames([:close | _rest], state),
-    do: {:stop, {:shutdown, {:closed, nil, nil}}, state}
 
   defp handle_frames([_other | rest], state), do: handle_frames(rest, state)
 
@@ -327,7 +337,6 @@ defmodule SpectreStudio.Pulse.Socket do
 
   defp upgrade_failure(status, _reason) when status in [401, 403], do: :unauthorized
   defp upgrade_failure(status, _reason) when is_integer(status), do: {:upgrade_failed, status}
-  defp upgrade_failure(_status, reason), do: failure(reason)
 
   defp failure(%Mint.TransportError{reason: reason}), do: {:transport, reason}
   defp failure(%Mint.HTTPError{reason: reason}), do: {:http, reason}

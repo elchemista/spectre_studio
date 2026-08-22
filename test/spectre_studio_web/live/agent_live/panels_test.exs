@@ -201,6 +201,122 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
       assert html =~ "panels withheld by this connection"
       assert html =~ "agent.runtime.stream"
     end
+
+    test "the hidden live panel cannot be opened by URL", %{conn: conn, spec: spec} do
+      assert {:error, {:live_redirect, %{to: path}}} = live(conn, agent_path(spec, :monitor))
+      assert path == "/connections/#{spec.id}"
+    end
+  end
+
+  describe "with Work/Vigil scopes" do
+    setup do
+      scopes = [
+        "agent.runtime.read",
+        "agent.runtime.stream",
+        "agent.operations.read",
+        "agent.operations.stream"
+      ]
+
+      {:ok, spec: connected_endpoint(scopes: scopes)}
+    end
+
+    test "streams publication-safe Work and Vigil snapshots", %{conn: conn, spec: spec} do
+      {:ok, live, html} = live(conn, agent_path(spec, :operations))
+      assert html =~ "not streaming"
+      assert html =~ "watch Work / Vigil"
+
+      live
+      |> form("#operations-form", %{
+        "operations" => %{
+          "subject" => "account-1",
+          "kinds" => "all",
+          "interval_ms" => "250",
+          "duration_ms" => ""
+        }
+      })
+      |> render_submit()
+
+      assert_receive {:operations_monitor_enabled, _id, _request, subscription_id}, 5_000
+      assert_receive {:operations_monitor_update, _id, ^subscription_id, _subscription}, 5_000
+
+      html = render(live)
+      assert html =~ "research_pages"
+      assert html =~ "cache_watch"
+      assert html =~ "publication-safe bounded snapshot"
+    end
+  end
+
+  describe "with semantic-cache review scopes" do
+    setup do
+      scopes = ["agent.semantic_cache.read", "agent.semantic_cache.promote"]
+      {:ok, spec: connected_endpoint(scopes: scopes)}
+    end
+
+    test "loads candidates and explicitly verifies one", %{conn: conn, spec: spec} do
+      {:ok, live, html} = live(conn, agent_path(spec, :cache))
+      assert html =~ "refresh candidates"
+
+      live |> element("button", "refresh candidates") |> render_click()
+      assert_eventually(live, "need a custom quote")
+
+      html = render(live)
+      assert html =~ "verify + promote"
+      assert html =~ "quarantined"
+
+      live |> element(~s(button[phx-click="verify"][phx-value-id="cache-1"])) |> render_click()
+      assert_eventually(live, "example verified and promoted")
+
+      html = render(live)
+      assert html =~ "verified"
+      refute html =~ "verify + promote"
+    end
+  end
+
+  describe "with Skill and Morph scopes" do
+    setup do
+      scopes = ["spectre.skill.runtime.mount", "spectre.morph.propose"]
+      {:ok, spec: connected_endpoint(scopes: scopes)}
+    end
+
+    test "mounts a runtime Skill and creates an evaluated Morph proposal", %{
+      conn: conn,
+      spec: spec
+    } do
+      {:ok, live, html} = live(conn, agent_path(spec, :evolve))
+      assert html =~ "create + mount Skill"
+      assert html =~ "create + evaluate proposal"
+
+      live
+      |> form("#skill-form", %{
+        "skill" => %{
+          "subject" => "account-1",
+          "mount_id" => "refunds",
+          "definition" => ~s({"id":"refunds","declared_version":1})
+        }
+      })
+      |> render_submit()
+
+      assert_eventually(live, "mounted")
+
+      live
+      |> form("#morph-form", %{
+        "morph" => %{
+          "subject" => "account-1",
+          "action" => "mount",
+          "by" => "actor:operator",
+          "reason" => "handle refunds",
+          "mount_id" => "refund-helper",
+          "match" => "refund",
+          "reply" => "Refund request: {{input.text}}",
+          "scopes" => "support",
+          "token_cap" => "128"
+        }
+      })
+      |> render_submit()
+
+      assert_eventually(live, "evaluated")
+      assert render(live) =~ "activated"
+    end
   end
 
   defp agent_path(spec, tab \\ nil) do

@@ -21,14 +21,13 @@ defmodule SpectreStudio.Pulse.Frame do
 
   @protocol_version 1
 
-  @monitor_enable "agent.runtime.monitor.enable"
-  @monitor_disable "agent.runtime.monitor.disable"
+  @monitor_kinds [:runtime, :operations]
 
   @type decoded ::
           {:manifest, map()}
           | {:receipt, map()}
           | {:error, map()}
-          | {:monitor, String.t(), map()}
+          | {:monitor, :runtime | :operations, String.t(), map()}
           | {:envelope, map()}
           | {:unknown, map()}
 
@@ -64,7 +63,12 @@ defmodule SpectreStudio.Pulse.Frame do
     do: {:ok, {:error, Map.get(value, "error", %{})}}
 
   defp classify(%{"pulse" => "connection", "type" => "agent.runtime.monitor." <> event} = value),
-    do: {:ok, {:monitor, event, value}}
+    do: {:ok, {:monitor, :runtime, event, value}}
+
+  defp classify(
+         %{"pulse" => "connection", "type" => "agent.operations.monitor." <> event} = value
+       ),
+       do: {:ok, {:monitor, :operations, event, value}}
 
   defp classify(%{"pulse" => "connection"} = value),
     do: {:ok, {:unknown, value}}
@@ -82,33 +86,50 @@ defmodule SpectreStudio.Pulse.Frame do
   a key that identifies nothing.
   """
   @spec monitor_enable(keyword()) :: {:ok, binary()} | {:error, term()}
-  def monitor_enable(opts) do
-    frame =
+  def monitor_enable(opts), do: monitor_enable(:runtime, opts)
+
+  @doc "Builds an enable frame for OTP runtime or Work/Vigil monitoring."
+  @spec monitor_enable(:runtime | :operations, keyword()) ::
+          {:ok, binary()} | {:error, term()}
+  def monitor_enable(kind, opts) when kind in @monitor_kinds and is_list(opts) do
+    with {:ok, request_id} <- required_binary(opts, :request_id),
+         {:ok, agent_address} <- required_binary(opts, :agent_address),
+         {:ok, subject} <- required_binary(opts, :subject) do
       %{
         "pulse" => "connection",
         "version" => @protocol_version,
-        "type" => @monitor_enable,
-        "request_id" => Keyword.fetch!(opts, :request_id),
-        "agent_address" => Keyword.fetch!(opts, :agent_address),
-        "subject" => Keyword.fetch!(opts, :subject)
+        "type" => monitor_type(kind, "enable"),
+        "request_id" => request_id,
+        "agent_address" => agent_address,
+        "subject" => subject
       }
       |> put_present("interval_ms", Keyword.get(opts, :interval_ms))
       |> put_present("duration_ms", Keyword.get(opts, :duration_ms))
-      |> put_present("fields", Keyword.get(opts, :fields))
-
-    encode(frame)
+      |> put_monitor_options(kind, opts)
+      |> encode()
+    end
   end
+
+  def monitor_enable(_kind, _opts), do: {:error, :invalid_monitor_kind}
 
   @doc "Builds a `monitor.disable` frame for a server-issued subscription id."
   @spec monitor_disable(String.t()) :: {:ok, binary()} | {:error, term()}
-  def monitor_disable(subscription_id) when is_binary(subscription_id) do
+  def monitor_disable(subscription_id), do: monitor_disable(:runtime, subscription_id)
+
+  @doc "Builds a disable frame for a typed server-issued subscription id."
+  @spec monitor_disable(:runtime | :operations, String.t()) ::
+          {:ok, binary()} | {:error, term()}
+  def monitor_disable(kind, subscription_id)
+      when kind in @monitor_kinds and is_binary(subscription_id) and subscription_id != "" do
     encode(%{
       "pulse" => "connection",
       "version" => @protocol_version,
-      "type" => @monitor_disable,
+      "type" => monitor_type(kind, "disable"),
       "subscription_id" => subscription_id
     })
   end
+
+  def monitor_disable(_kind, _subscription_id), do: {:error, :invalid_monitor_subscription}
 
   @doc """
   Builds an ordinary Pulse envelope.
@@ -181,6 +202,28 @@ defmodule SpectreStudio.Pulse.Frame do
 
   defp format_uuid(<<a::binary-8, b::binary-4, c::binary-4, d::binary-4, e::binary-12>>),
     do: "#{a}-#{b}-#{c}-#{d}-#{e}"
+
+  @spec put_monitor_options(map(), :runtime | :operations, keyword()) :: map()
+  defp put_monitor_options(frame, :runtime, opts) do
+    put_present(frame, "fields", Keyword.get(opts, :fields))
+  end
+
+  defp put_monitor_options(frame, :operations, opts) do
+    frame
+    |> put_present("kinds", Keyword.get(opts, :kinds))
+    |> put_present("include_terminal", Keyword.get(opts, :include_terminal))
+  end
+
+  @spec monitor_type(:runtime | :operations, String.t()) :: String.t()
+  defp monitor_type(kind, action), do: "agent.#{kind}.monitor.#{action}"
+
+  @spec required_binary(keyword(), atom()) :: {:ok, String.t()} | {:error, term()}
+  defp required_binary(opts, key) do
+    case Keyword.get(opts, key) do
+      value when is_binary(value) and value != "" -> {:ok, value}
+      _other -> {:error, {:missing_monitor_field, key}}
+    end
+  end
 
   defp put_present(map, _key, nil), do: map
   defp put_present(map, _key, []), do: map

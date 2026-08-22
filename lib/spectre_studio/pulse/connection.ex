@@ -81,6 +81,12 @@ defmodule SpectreStudio.Pulse.Connection do
   @spec disable_monitor(String.t(), String.t()) :: :ok | {:error, term()}
   def disable_monitor(id, subscription_id), do: call(id, {:disable_monitor, subscription_id})
 
+  @doc "Enables near-realtime Work and Vigil monitoring for one Agent Instance."
+  @spec enable_operations_monitor(String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  def enable_operations_monitor(id, opts),
+    do: call(id, {:enable_monitor, :operations, opts, self()})
+
   @doc "Sends one Pulse envelope to an Agent."
   @spec send_envelope(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def send_envelope(id, opts), do: call(id, {:send_envelope, opts})
@@ -129,6 +135,7 @@ defmodule SpectreStudio.Pulse.Connection do
   def handle_cast(:disconnect, state) do
     state =
       state
+      |> notify_subscriptions_lost()
       |> cancel_reconnect()
       |> close_socket()
       |> log(:sent, "disconnect requested")
@@ -140,9 +147,14 @@ defmodule SpectreStudio.Pulse.Connection do
   @impl GenServer
   def handle_call(:snapshot, _from, state), do: {:reply, {:ok, public(state)}, state}
 
-  def handle_call({:enable_monitor, opts, owner}, _from, state) do
+  def handle_call({:enable_monitor, opts, owner}, from, state) do
+    handle_call({:enable_monitor, :runtime, opts, owner}, from, state)
+  end
+
+  def handle_call({:enable_monitor, kind, opts, owner}, _from, state)
+      when kind in [:runtime, :operations] do
     if state.status == :ready do
-      do_enable_monitor(opts, owner, state)
+      do_enable_monitor(kind, opts, owner, state)
     else
       {:reply, {:error, :not_ready}, state}
     end
@@ -150,14 +162,18 @@ defmodule SpectreStudio.Pulse.Connection do
 
   def handle_call({:disable_monitor, subscription_id}, _from, state) do
     case Map.fetch(state.subscriptions, subscription_id) do
-      {:ok, _subscription} ->
-        {:ok, frame} = Frame.monitor_disable(subscription_id)
-        push(state, frame)
+      {:ok, subscription} ->
+        with {:ok, frame} <- Frame.monitor_disable(subscription.kind, subscription_id),
+             :ok <- push(state, frame) do
+          next =
+            state
+            |> log(:sent, "#{monitor_label(subscription.kind)}.disable #{short(subscription_id)}")
+            |> mark_subscription(subscription_id, :stopping)
 
-        {:reply, :ok,
-         state
-         |> log(:sent, "monitor.disable #{short(subscription_id)}")
-         |> drop_subscription(subscription_id)}
+          {:reply, :ok, next}
+        else
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
 
       :error ->
         {:reply, {:error, :unknown_subscription}, state}
@@ -320,7 +336,7 @@ defmodule SpectreStudio.Pulse.Connection do
       {:ok, {:manifest, frame}} -> apply_manifest(frame, state)
       {:ok, {:receipt, receipt}} -> apply_receipt(receipt, state)
       {:ok, {:error, error}} -> apply_error(error, state)
-      {:ok, {:monitor, event, frame}} -> apply_monitor(event, frame, state)
+      {:ok, {:monitor, kind, event, frame}} -> apply_monitor(kind, event, frame, state)
       {:ok, {:envelope, envelope}} -> apply_envelope(envelope, state)
       {:ok, {:unknown, _frame}} -> log(state, :note, "unrecognised frame ignored")
       {:error, reason} -> log(state, :fail, "undecodable frame: #{reason}")
@@ -370,33 +386,42 @@ defmodule SpectreStudio.Pulse.Connection do
 
   # --- monitoring ------------------------------------------------------------
 
-  defp do_enable_monitor(opts, owner, state) do
+  defp do_enable_monitor(kind, opts, owner, state) do
     request_id = Frame.uuid7()
 
-    frame_opts = [
-      request_id: request_id,
-      agent_address: Keyword.fetch!(opts, :agent_address),
-      subject: Keyword.fetch!(opts, :subject),
-      interval_ms: Keyword.get(opts, :interval_ms),
-      duration_ms: Keyword.get(opts, :duration_ms),
-      fields: Keyword.get(opts, :fields, @default_fields)
-    ]
-
-    with {:ok, frame} <- Frame.monitor_enable(frame_opts),
+    with {:ok, agent_address} <- monitor_option(opts, :agent_address),
+         {:ok, subject} <- monitor_option(opts, :subject),
+         frame_opts = [
+           request_id: request_id,
+           agent_address: agent_address,
+           subject: subject,
+           interval_ms: Keyword.get(opts, :interval_ms),
+           duration_ms: Keyword.get(opts, :duration_ms),
+           fields: Keyword.get(opts, :fields, @default_fields),
+           kinds: Keyword.get(opts, :kinds, ["work", "vigil"]),
+           include_terminal: Keyword.get(opts, :include_terminal, false)
+         ],
+         {:ok, frame} <- Frame.monitor_enable(kind, frame_opts),
          :ok <- push(state, frame) do
       pending = %{
+        kind: kind,
         request_id: request_id,
         owner: owner,
         agent_address: frame_opts[:agent_address],
         subject: frame_opts[:subject],
-        fields: frame_opts[:fields]
+        fields: frame_opts[:fields],
+        kinds: frame_opts[:kinds],
+        include_terminal: frame_opts[:include_terminal]
       }
 
       state =
         state
         |> Map.update!(:pending, &Map.put(&1, request_id, pending))
         |> watch_owner(owner)
-        |> log(:sent, "monitor.enable #{short_address(frame_opts[:agent_address])}")
+        |> log(
+          :sent,
+          "#{monitor_label(kind)}.enable #{short_address(frame_opts[:agent_address])}"
+        )
 
       {:reply, {:ok, request_id}, state}
     else
@@ -404,22 +429,33 @@ defmodule SpectreStudio.Pulse.Connection do
     end
   end
 
-  defp apply_monitor("enabled", frame, state) do
+  @spec monitor_option(keyword(), atom()) :: {:ok, String.t()} | {:error, term()}
+  defp monitor_option(opts, key) do
+    case Keyword.get(opts, key) do
+      value when is_binary(value) and value != "" -> {:ok, value}
+      _other -> {:error, {:missing_monitor_field, key}}
+    end
+  end
+
+  defp apply_monitor(kind, "enabled", frame, state) do
     request_id = Map.get(frame, "request_id")
     subscription_id = Map.get(frame, "subscription_id")
 
     case Map.pop(state.pending, request_id) do
       {nil, _pending} ->
-        log(state, :note, "monitor.enabled for an unknown request")
+        disable_unknown_subscription(state, kind, subscription_id)
 
-      {pending, remaining} ->
+      {%{kind: ^kind} = pending, remaining} ->
         subscription = %{
+          kind: kind,
           id: subscription_id,
           request_id: request_id,
           owner: pending.owner,
           agent_address: pending.agent_address,
           subject: pending.subject,
           fields: pending.fields,
+          kinds: pending.kinds,
+          include_terminal: pending.include_terminal,
           interval_ms: Map.get(frame, "interval_ms"),
           duration_ms: Map.get(frame, "duration_ms"),
           sequence: 0,
@@ -427,6 +463,7 @@ defmodule SpectreStudio.Pulse.Connection do
           gaps: 0,
           series: %{},
           latest: %{},
+          snapshot: %{},
           status: :streaming
         }
 
@@ -438,17 +475,22 @@ defmodule SpectreStudio.Pulse.Connection do
             subscriptions: Map.put(state.subscriptions, subscription_id, subscription)
         }
 
-        broadcast(state, {:monitor_enabled, state.spec.id, request_id, subscription_id})
+        broadcast_monitor_enabled(state, subscription)
         broadcast_update(state, subscription)
-        log(state, :received, "monitor.enabled #{short(subscription_id)}")
+        log(state, :received, "#{monitor_label(kind)}.enabled #{short(subscription_id)}")
+
+      {_other_kind, remaining} ->
+        state
+        |> Map.put(:pending, remaining)
+        |> disable_unknown_subscription(kind, subscription_id)
     end
   end
 
-  defp apply_monitor("update", frame, state) do
+  defp apply_monitor(kind, "update", frame, state) do
     subscription_id = Map.get(frame, "subscription_id")
 
     case Map.fetch(state.subscriptions, subscription_id) do
-      {:ok, subscription} ->
+      {:ok, %{kind: ^kind} = subscription} ->
         sequence = Map.get(frame, "sequence", subscription.sequence + 1)
         dropped = Map.get(frame, "dropped_updates", 0)
 
@@ -464,34 +506,38 @@ defmodule SpectreStudio.Pulse.Connection do
     end
   end
 
-  defp apply_monitor("disabled", frame, state) do
+  defp apply_monitor(kind, "disabled", frame, state) do
     subscription_id = Map.get(frame, "subscription_id")
 
-    state
-    |> log(:received, "monitor.disabled #{short(subscription_id)}")
-    |> drop_subscription(subscription_id)
+    if Map.has_key?(state.subscriptions, subscription_id) do
+      state
+      |> log(:received, "#{monitor_label(kind)}.disabled #{short(subscription_id)}")
+      |> drop_subscription(subscription_id)
+    else
+      state
+    end
   end
 
-  defp apply_monitor("expired", frame, state) do
+  defp apply_monitor(kind, "expired", frame, state) do
     subscription_id = Map.get(frame, "subscription_id")
 
     state
     |> mark_subscription(subscription_id, :expired)
-    |> log(:note, "monitor.expired #{short(subscription_id)}")
+    |> log(:note, "#{monitor_label(kind)}.expired #{short(subscription_id)}")
   end
 
-  defp apply_monitor("error", frame, state) do
+  defp apply_monitor(kind, "error", frame, state) do
     subscription_id = Map.get(frame, "subscription_id")
     error = Map.get(frame, "error", %{})
     label = "#{Map.get(error, "kind", "unknown")}/#{Map.get(error, "code", "unknown")}"
 
     state
     |> mark_subscription(subscription_id, {:error, label})
-    |> log(:fail, "monitor.error #{label}")
+    |> log(:fail, "#{monitor_label(kind)}.error #{label}")
   end
 
-  defp apply_monitor(event, _frame, state) do
-    log(state, :note, "monitor.#{event} ignored")
+  defp apply_monitor(kind, event, _frame, state) do
+    log(state, :note, "#{monitor_label(kind)}.#{event} ignored")
   end
 
   # Folds one snapshot into the subscription's buffers.
@@ -499,9 +545,9 @@ defmodule SpectreStudio.Pulse.Connection do
   # A sequence jump or a non-zero `dropped_updates` means samples were never
   # observed. They enter the series as explicit holes: an interpolated line would
   # read as measurement, and it is not.
-  defp absorb_snapshot(subscription, snapshot, sequence, dropped) do
+  defp absorb_snapshot(%{kind: :runtime} = subscription, snapshot, sequence, dropped) do
     process = Map.get(snapshot, "process", %{})
-    missed = max(sequence - subscription.sequence - 1, 0) + max(dropped - subscription.dropped, 0)
+    missed = missed_samples(subscription, sequence, dropped)
 
     series =
       Enum.reduce(subscription.fields, subscription.series, fn field, series ->
@@ -529,32 +575,56 @@ defmodule SpectreStudio.Pulse.Connection do
     }
   end
 
+  defp absorb_snapshot(%{kind: :operations} = subscription, snapshot, sequence, dropped) do
+    missed = missed_samples(subscription, sequence, dropped)
+
+    %{
+      subscription
+      | sequence: sequence,
+        dropped: dropped,
+        gaps: subscription.gaps + if(missed > 0, do: 1, else: 0),
+        snapshot: snapshot,
+        status: :streaming
+    }
+  end
+
   defp broadcast_update(state, subscription) do
-    broadcast(
-      state,
-      {:monitor_update, state.spec.id, subscription.id, public_subscription(subscription)}
-    )
+    event =
+      case subscription.kind do
+        :runtime -> :monitor_update
+        :operations -> :operations_monitor_update
+      end
+
+    broadcast(state, {event, state.spec.id, subscription.id, public_subscription(subscription)})
   end
 
   defp notify_subscriptions_lost(state) do
-    Enum.each(state.subscriptions, fn {id, _subscription} ->
-      broadcast(state, {:monitor_lost, state.spec.id, id})
+    Enum.each(state.subscriptions, fn {id, subscription} ->
+      event = if subscription.kind == :runtime, do: :monitor_lost, else: :operations_monitor_lost
+      broadcast(state, {event, state.spec.id, id})
     end)
 
     state
   end
 
   defp disable_owned_by(pid, state) do
+    state =
+      state.pending
+      |> Enum.filter(fn {_request_id, pending} -> pending.owner == pid end)
+      |> Enum.reduce(state, fn {request_id, _pending}, next ->
+        Map.update!(next, :pending, &Map.delete(&1, request_id))
+      end)
+
     state.subscriptions
     |> Enum.filter(fn {_id, subscription} -> subscription.owner == pid end)
-    |> Enum.reduce(state, fn {id, _subscription}, state ->
-      case Frame.monitor_disable(id) do
+    |> Enum.reduce(state, fn {id, subscription}, state ->
+      case Frame.monitor_disable(subscription.kind, id) do
         {:ok, frame} -> push(state, frame)
         _error -> :ok
       end
 
       state
-      |> log(:note, "panel closed, monitor.disable #{short(id)}")
+      |> log(:note, "panel closed, #{monitor_label(subscription.kind)}.disable #{short(id)}")
       |> drop_subscription(id)
     end)
     |> Map.update!(:owners, &Map.delete(&1, pid))
@@ -576,8 +646,17 @@ defmodule SpectreStudio.Pulse.Connection do
   defp drop_subscription(state, nil), do: state
 
   defp drop_subscription(state, subscription_id) do
-    broadcast(state, {:monitor_ended, state.spec.id, subscription_id})
-    %{state | subscriptions: Map.delete(state.subscriptions, subscription_id)}
+    case Map.pop(state.subscriptions, subscription_id) do
+      {nil, _subscriptions} ->
+        state
+
+      {subscription, subscriptions} ->
+        event =
+          if subscription.kind == :runtime, do: :monitor_ended, else: :operations_monitor_ended
+
+        broadcast(state, {event, state.spec.id, subscription_id})
+        %{state | subscriptions: subscriptions}
+    end
   end
 
   defp mark_subscription(state, nil, _status), do: state
@@ -654,6 +733,7 @@ defmodule SpectreStudio.Pulse.Connection do
   defp public_subscription(subscription) do
     Map.take(subscription, [
       :id,
+      :kind,
       :request_id,
       :agent_address,
       :subject,
@@ -665,9 +745,49 @@ defmodule SpectreStudio.Pulse.Connection do
       :gaps,
       :series,
       :latest,
+      :snapshot,
+      :kinds,
+      :include_terminal,
       :status
     ])
   end
+
+  @spec missed_samples(map(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp missed_samples(subscription, sequence, dropped) do
+    max(sequence - subscription.sequence - 1, 0) + max(dropped - subscription.dropped, 0)
+  end
+
+  @spec broadcast_monitor_enabled(map(), map()) :: :ok
+  defp broadcast_monitor_enabled(state, subscription) do
+    event =
+      if subscription.kind == :runtime, do: :monitor_enabled, else: :operations_monitor_enabled
+
+    broadcast(
+      state,
+      {event, state.spec.id, subscription.request_id, subscription.id}
+    )
+  end
+
+  @spec disable_unknown_subscription(map(), :runtime | :operations, term()) :: map()
+  defp disable_unknown_subscription(state, kind, subscription_id)
+       when is_binary(subscription_id) do
+    case Frame.monitor_disable(kind, subscription_id) do
+      {:ok, frame} -> push(state, frame)
+      {:error, _reason} -> :ok
+    end
+
+    log(
+      state,
+      :note,
+      "#{monitor_label(kind)}.enabled arrived after its owner left; disabled #{short(subscription_id)}"
+    )
+  end
+
+  defp disable_unknown_subscription(state, _kind, _subscription_id), do: state
+
+  @spec monitor_label(:runtime | :operations) :: String.t()
+  defp monitor_label(:runtime), do: "runtime.monitor"
+  defp monitor_label(:operations), do: "operations.monitor"
 
   # --- plumbing --------------------------------------------------------------
 

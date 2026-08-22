@@ -6,15 +6,18 @@ libraries, and Pulse says so explicitly. So when Studio needs something that is
 not runtime monitoring, it asks the **host application** for it, over the Pulse
 socket, as an ordinary envelope.
 
-This document is that contract. Implement it and the Ledger panels open. Leave
-it unimplemented and Studio keeps them closed with a stated reason, rather than
-failing in a way that looks like a bug.
+This document is that contract. Implemented cache, Skill and Morph operations
+open their Agent panels; the Ledger operations define the next consumers.
+Leave an operation unimplemented and the host should return its typed `.error`
+reply rather than failing in a way that looks like a transport bug.
 
 ## Status
 
-Not implemented in Studio yet. The Lab panel currently works from operator
-uploads only. This file defines the shape the bridge will take, so a host can
-be built against it and so the reason a panel is missing is written down.
+Implemented in Studio for semantic-cache review, runtime Skill mounting and
+Morph proposal authoring. Ledger and remote Lab consumers still remain to be
+built. The host side is intentionally application-owned: Pulse authenticates
+and transports the envelope, while the host resolves the Agent/Instance and
+executes the domain API under its own authorization policy.
 
 ## Shape
 
@@ -44,6 +47,57 @@ replies with `act: :inform` and `relates_to` set to the request id.
 | `studio.ledger.entries` | `{"subject": …, "limit": n}` | `{"entries": [...]}` | Chain view |
 | `studio.ledger.inference_usage` | `{"subject": …}` | `{"usage": {...}}` | Token and model totals |
 | `studio.ledger.bundle.export` | `{"subject": …}` | `{"bundle": "<base64>"}` | Lab playback and diff without a manual upload |
+| `studio.semantic_cache.examples` | `{"source": "online_learned"}` | `{"examples": [...]}` | Per-Agent review queue |
+| `studio.semantic_cache.verify` | `{"example_id": …}` | `{"example": {...}}` | Explicit verification and promotion |
+| `studio.skill.mount` | `{"subject": …, "mount_id": …, "definition": {...}}` | `{"status": "mounted", "revision": n}` | New runtime Skill |
+| `studio.morph.propose_skill` | Morph fields below | Morph status + report | Governed Skill proposal and evaluation |
+
+Every successful reply uses the request type plus `.result`; every safe
+failure uses `.error`. The reply is an `inform` envelope whose `relates_to`
+equals the request id. A Pulse transport receipt only means that the host
+accepted the envelope; it is not the operation result.
+
+### Semantic cache
+
+`studio.semantic_cache.verify` maps to
+`Spectre.Router.SemanticCache.verify/3`. For the built-in learned cache this is
+also the promotion step: it sets `verified?: true`, records `verified_at`, and
+makes the row eligible for normal lookup. Studio deliberately calls the action
+**verify + promote** so the operational effect is visible.
+
+The host resolves the canonical Pulse address to a known Agent module. It must
+never create a module atom from the remote address or another client string.
+
+### Runtime Skill mount
+
+The host validates `definition` with `Spectre.Skill.Definition.new/1`, obtains
+the application-owned `Spectre.Skill.Runtime`, and calls
+`Spectre.Skill.Runtime.mount/4` with its current expected revision. Studio does
+not own the Authority Envelope or cache a copy of the runtime.
+
+### Morph proposal
+
+The request contains:
+
+```json
+{
+  "subject": "account-123",
+  "action": "mount",
+  "by": "actor:studio",
+  "reason": "Serve refund questions",
+  "mount_id": "refunds",
+  "match": "refund",
+  "reply": "Refund request: {{input.text}}",
+  "scopes": ["support"],
+  "token_cap": 128
+}
+```
+
+The host resolves the Instance and runs `Spectre.Morph.change/2`, followed by
+`mount_skill/3` or `replace_skill/3`, then `evaluate/2`. This operation stops
+there. It does **not** approve or activate the candidate; those are separate
+human/host governance commits and are intentionally absent from this Studio
+surface.
 
 ## Authorisation
 
@@ -56,6 +110,12 @@ it handles the payload:
 scopes: [
   "agent.runtime.read",
   "agent.runtime.stream",
+  "agent.operations.read",
+  "agent.operations.stream",
+  "agent.semantic_cache.read",
+  "agent.semantic_cache.promote",
+  "spectre.skill.runtime.mount",
+  "spectre.morph.propose",
   "ledger.read",
   "lab.read"
 ]
@@ -63,6 +123,10 @@ scopes: [
 
 Studio shows a panel only when the manifest lists the matching scope. That is a
 statement of intent, not a boundary — the boundary stays with the host.
+
+The runtime and operations scope pairs are enforced by Pulse itself. The
+semantic-cache, Skill and Morph scopes are application scopes and therefore
+must be checked again by the host handler before it invokes Spectre.
 
 ## The bundle export is a privileged operation
 

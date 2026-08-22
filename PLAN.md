@@ -25,10 +25,10 @@ Aggiornato il 2026-08-22, branch `feature/studio-foundation`, nessun commit.
 | M0 — fondazione visiva | **fatto** | daisyUI rimosso; `assets/css/app.css` portato dal riferimento più le otto estensioni; `core_components.ex` + `studio_components.ex`; shell, rail, footer, toggle tema |
 | M1 — client Pulse WSS | **fatto** | `Pulse.Socket` (Mint), `Pulse.Connection`, `Vault` cifrato, backoff, riconnessione, stati terminali |
 | M2 — manifest e scope | **fatto** | `Manifest`, `Agent`, `Scopes`; azioni non autorizzate assenti dal DOM, scope negati mostrati |
-| M3 — dashboard e monitoraggio | **fatto** | `AgentLive` con tab, metriche, sparkline con lacune, ciclo enable/disable completo |
+| M3 — dashboard e monitoraggio | **fatto** | `AgentLive` con OTP + Work/Vigil, metriche, snapshot, lacune e ciclo enable/disable completo |
 | M4 — messaggi | **fatto** | invio envelope validato lato Studio, receipt correlate |
 | M5 — Lab | **parziale** | upload + verifica + timeline + diff funzionanti; il bridge remoto è specificato ma non implementato |
-| M6 — Ledger/estensioni | **specificato** | `docs/STUDIO_BRIDGE.md` definisce il contratto; nessun pannello Ledger ancora |
+| M6 — Ledger/estensioni | **parziale** | bridge cache/Skill/Morph e pannelli Agent implementati; Ledger e Lab remoto ancora mancanti |
 | M7 — sicurezza | **rivisto** | nessun login, per scelta esplicita: si lancia Studio e si è nella dashboard. Restano CSP, `noindex`, redazione dei token, vault cifrato, e l'ascolto legato a loopback |
 | M8 — test e qualità | **fatto** | 98 test verdi, `FakePulse` completo, `credo --strict` pulito, formattato |
 
@@ -70,9 +70,19 @@ ancora. Sintomo: connessione ferma in `:authenticating`, in modo intermittente.
 Ora vengono messi da parte e decodificati subito dopo l'upgrade
 (`lib/spectre_studio/pulse/socket.ex`).
 
+### Estensioni aggiunte dopo la fondazione
+
+- protocollo Pulse aggiornato al branch Work/Vigil: frame
+  `agent.operations.monitor.*`, scope pair e cleanup condiviso;
+- review per-Agent della cache semantica, con verifica/promozione esplicita;
+- mount di nuove runtime Skill via definizione dichiarativa;
+- proposta Morph governata, limitata a creazione + valutazione;
+- gating delle rotte oltre che dei tab: un pannello senza scope non è
+  raggiungibile nemmeno digitandone direttamente l'URL.
+
 ### Cosa manca per considerare Studio completo
 
-- il bridge di `docs/STUDIO_BRIDGE.md` lato Studio, e un host che lo implementi;
+- i consumer Ledger/Lab remoto del bridge e un host che li implementi;
 - i pannelli Ledger che ne dipendono;
 - verifica browser con Spectre Lens sulle rotte principali;
 - `Dockerfile` e release.
@@ -112,10 +122,10 @@ Verificato leggendo il sorgente, non solo i README:
   `granted_profiles`, `status`, `connected_at`), `spec` (`transport`, `mode`, `profiles`,
   `scopes`), `agents` (lista di `AgentDescriptor.to_wire/1`: `address`, `display_name`,
   `protocol_versions`, `capabilities`, `metadata`).
-- **Gli scope runtime esistenti sono due soli**: `agent.runtime.read` e
-  `agent.runtime.stream`. Ogni altro scope del concept (Lab, Ledger, controllo
-  operativo, promozione cache) è **nome applicativo**, non ancora imposto da Pulse.
-  Studio li tratta come grant dichiarati nel manifest, e la UI si adatta.
+- **Pulse impone due coppie di scope**: `agent.runtime.read/stream` per OTP e
+  `agent.operations.read/stream` per Work/Vigil. Lab, Ledger, controllo,
+  promozione cache, Skill e Morph restano **scope applicativi**: Studio li
+  tratta come grant dichiarati nel manifest e l'host deve imporli di nuovo.
 - **Lab non ha il concetto di "Run/Turn" pronto all'uso.** L'API pubblica è minima:
   `Spectre.Lab.load/2`, `load_receipts/2`, `diff/2`, più `Playback.revisions/fetch/completeness`
   e `ReceiptPlayback.sequences/by_kind`. La vista "Runs e Turns" del concept va

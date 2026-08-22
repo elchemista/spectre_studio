@@ -18,7 +18,7 @@ defmodule SpectreStudioWeb.AgentLive.Messages do
 
   @impl Phoenix.LiveView
   def mount(params, _session, socket) do
-    case Shell.mount_agent(socket, params, :messages) do
+    case Shell.mount_agent(socket, params, :messages, :message_send) do
       {:ok, socket} ->
         sent = socket.assigns.connection.sent
 

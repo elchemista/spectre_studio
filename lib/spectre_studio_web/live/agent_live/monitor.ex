@@ -34,7 +34,7 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
 
   @impl Phoenix.LiveView
   def mount(params, _session, socket) do
-    case Shell.mount_agent(socket, params, :monitor) do
+    case Shell.mount_agent(socket, params, :monitor, :monitor_stream) do
       {:ok, socket} ->
         {:ok,
          socket

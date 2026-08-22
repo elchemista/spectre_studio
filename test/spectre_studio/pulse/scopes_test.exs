@@ -16,6 +16,15 @@ defmodule SpectreStudio.Pulse.ScopesTest do
     refute Scopes.can?(manifest, :message_send)
   end
 
+  test "stream capabilities require both read and stream scopes" do
+    refute Scopes.can?(manifest(["agent.operations.stream"]), :operations_stream)
+
+    assert Scopes.can?(
+             manifest(["agent.operations.read", "agent.operations.stream"]),
+             :operations_stream
+           )
+  end
+
   test "a connection with no manifest grants nothing" do
     for capability <- Scopes.capabilities() do
       refute Scopes.can?(nil, capability)

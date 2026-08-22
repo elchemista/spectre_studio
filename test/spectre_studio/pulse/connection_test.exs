@@ -115,6 +115,13 @@ defmodule SpectreStudio.Pulse.ConnectionTest do
                )
     end
 
+    test "invalid monitor input does not crash the connection", %{spec: spec} do
+      assert {:error, {:missing_monitor_field, :subject}} =
+               Connection.enable_monitor(spec.id, agent_address: @address)
+
+      assert {:ok, %{status: :ready}} = Connection.snapshot(spec.id)
+    end
+
     test "a dead panel takes its subscription with it", %{spec: spec} do
       test_pid = self()
 
@@ -140,6 +147,59 @@ defmodule SpectreStudio.Pulse.ConnectionTest do
       assert_receive {:monitor_ended, _id, ^subscription_id}, 2_000
       assert {:ok, snapshot} = Connection.snapshot(spec.id)
       assert snapshot.subscriptions == %{}
+    end
+  end
+
+  describe "Work and Vigil monitoring" do
+    setup do
+      port =
+        start_endpoint(
+          scopes: [
+            "agent.runtime.read",
+            "agent.runtime.stream",
+            "agent.operations.read",
+            "agent.operations.stream"
+          ]
+        )
+
+      spec = start_connection(port)
+      Connection.connect(spec.id)
+      assert_receive {:connection_status, _id, :ready}, 2_000
+      {:ok, spec: spec}
+    end
+
+    test "streams complete bounded operation snapshots", %{spec: spec} do
+      assert {:ok, _request_id} =
+               Connection.enable_operations_monitor(spec.id,
+                 agent_address: @address,
+                 subject: "account-1",
+                 interval_ms: 250,
+                 kinds: ["work", "vigil"]
+               )
+
+      assert_receive {:operations_monitor_enabled, _id, _request, subscription_id}, 2_000
+
+      assert_receive {:operations_monitor_update, _id, ^subscription_id, subscription},
+                     2_000
+
+      assert subscription.kind == :operations
+      assert subscription.snapshot["counts"] == %{"total" => 2, "work" => 1, "vigil" => 1}
+      assert Enum.count(subscription.snapshot["operations"]) == 2
+
+      assert :ok = Connection.disable_monitor(spec.id, subscription_id)
+      assert_receive {:operations_monitor_ended, _id, ^subscription_id}, 2_000
+    end
+
+    test "an explicit disconnect terminates every panel subscription", %{spec: spec} do
+      assert {:ok, _request_id} =
+               Connection.enable_operations_monitor(spec.id,
+                 agent_address: @address,
+                 subject: "account-1"
+               )
+
+      assert_receive {:operations_monitor_enabled, _id, _request, subscription_id}, 2_000
+      Connection.disconnect(spec.id)
+      assert_receive {:operations_monitor_lost, _id, ^subscription_id}, 2_000
     end
   end
 

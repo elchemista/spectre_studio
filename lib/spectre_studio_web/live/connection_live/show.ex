@@ -144,8 +144,8 @@ defmodule SpectreStudioWeb.ConnectionLive.Show do
                 <.scope_badge :for={scope <- @scopes.withheld} scope={scope} granted={false} />
               </div>
               <p class="term-comment text-[0.68rem] t-faint">
-                a withheld scope is why a panel is missing — only agent.runtime.* are enforced by Pulse itself,
-                the rest are application scopes the host defines
+                a withheld scope is why a panel is missing — agent.runtime.* and agent.operations.* are
+                enforced by Pulse itself; cache, Skill and Morph are application scopes the host defines
               </p>
             </div>
           </.term_window>

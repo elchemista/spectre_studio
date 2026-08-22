@@ -34,9 +34,13 @@ defmodule SpectreStudio.Pulse.Connection do
   @series_length 120
   @event_log_length 200
   @max_backoff_ms 30_000
-  @default_fields ~w(memory message_queue_len reductions status total_heap_size)
+  @default_fields ~w(
+    registered_name status initial_call current_function message_queue_len links monitors
+    monitored_by trap_exit error_handler priority group_leader total_heap_size heap_size
+    stack_size reductions garbage_collection suspending memory
+  )
 
-  @doc "The safe process fields Studio offers, a subset of the Pulse vocabulary."
+  @doc "The complete bounded Process.info/2 allowlist published by Pulse."
   @spec default_fields() :: [String.t()]
   def default_fields, do: @default_fields
 
@@ -574,6 +578,7 @@ defmodule SpectreStudio.Pulse.Connection do
         gaps: subscription.gaps + if(missed > 0, do: 1, else: 0),
         series: series,
         latest: process,
+        snapshot: Map.drop(snapshot, ["process"]),
         status: :streaming
     }
   end

@@ -81,8 +81,9 @@ the socket URL, which is the shape Pulse's own Phoenix guide documents.
 
 ## What Studio shows, and what it does not
 
-Realtime monitoring samples selected `Process.info/2` fields from the OTP
-process behind one Agent Instance. It is not the Agent's history:
+Realtime monitoring samples Pulse's complete publication-safe `Process.info/2`
+allowlist from the OTP process behind one Agent Instance. Studio shows five
+summary charts plus the complete current snapshot. It is not the Agent's history:
 
 - no mailbox contents, process dictionary or GenServer state;
 - no memory records, prompts or model calls;
@@ -102,9 +103,14 @@ stops when the panel closes, the tab changes, or the LiveView dies.
 When a host advertises the application bridge scopes, each Agent also gets:
 
 - a semantic-cache review queue with explicit **verify + promote**;
-- runtime Skill creation from a declarative JSON definition;
+- a bounded persisted Journal/turn view;
+- the current compiled Skill inventory;
 - governed Morph Skill proposals that stop after evaluation, before approval
   or activation.
+
+All known tabs remain visible. Locked tabs and the Overview capability matrix
+show the exact scopes missing from the remote manifest, so an unavailable
+capability is distinguishable from a Studio rendering bug.
 
 The bridge shapes and host responsibilities are in
 [`docs/STUDIO_BRIDGE.md`](docs/STUDIO_BRIDGE.md).
@@ -113,8 +119,8 @@ The bridge shapes and host responsibilities are in
 
 - [`PLAN.md`](PLAN.md) — the build plan and its current state
 - [`docs/UI.md`](docs/UI.md) — the visual language, its tokens and components
-- [`docs/STUDIO_BRIDGE.md`](docs/STUDIO_BRIDGE.md) — what a host implements to
-  unlock the Ledger and remote Lab panels
+- [`docs/STUDIO_BRIDGE.md`](docs/STUDIO_BRIDGE.md) — Pulse operations and grants
+  that unlock Cache, Journal, Skills and Morph
 
 ## Development
 

@@ -1,10 +1,10 @@
 defmodule SpectreStudioWeb.AgentLive.Evolve do
   @moduledoc """
-  Per-Agent runtime Skill creation and governed Morph proposal authoring.
+  Per-Agent Skill inventory and governed Morph proposal authoring.
 
-  Direct Skill mounts and Morph proposals are deliberately separate actions.
-  A Morph request creates and evaluates a candidate; it never implies approval
-  or activation, which remain independent host commits.
+  Runtime Skill changes go through Morph. A request creates and evaluates a
+  candidate; it never implies approval or activation, which remain independent
+  host commits.
   """
 
   use SpectreStudioWeb, :live_view
@@ -15,19 +15,24 @@ defmodule SpectreStudioWeb.AgentLive.Evolve do
   alias SpectreStudio.Pulse.StudioBridge
   alias SpectreStudioWeb.AgentLive.Shell
 
-  @requirements {:any, [:skill_create, :morph_create]}
+  @requirements {:any, [:skill_read, :morph_create]}
 
   @impl Phoenix.LiveView
   def mount(params, _session, socket) do
     case Shell.mount_agent(socket, params, :evolve, @requirements) do
       {:ok, socket} ->
-        {:ok,
-         socket
-         |> assign(:pending, %{})
-         |> assign(:error, nil)
-         |> assign(:result, nil)
-         |> assign(:skill_form, skill_form())
-         |> assign(:morph_form, morph_form())}
+        socket =
+          socket
+          |> assign(:skills, [])
+          |> assign(:pending, %{})
+          |> assign(:error, nil)
+          |> assign(:result, nil)
+          |> assign(:morph_form, morph_form())
+
+        if connected?(socket) and Scopes.can?(socket.assigns.connection.manifest, :skill_read),
+          do: send(self(), :load_skills)
+
+        {:ok, socket}
 
       {:redirect, socket} ->
         {:ok, socket}
@@ -35,25 +40,14 @@ defmodule SpectreStudioWeb.AgentLive.Evolve do
   end
 
   @impl Phoenix.LiveView
-  def handle_event("mount-skill", %{"skill" => params}, socket) do
-    with {:ok, definition} <- decode_object(params["definition"]),
-         {:ok, subject} <- required(params, "subject"),
-         {:ok, mount_id} <- required(params, "mount_id") do
-      attrs = %{
-        "subject" => subject,
-        "mount_id" => mount_id,
-        "definition" => definition
-      }
+  def handle_event("refresh-skills", _params, socket) do
+    case StudioBridge.list_skills(socket.assigns.connection.id, socket.assigns.agent.address) do
+      {:ok, envelope} ->
+        pending = Map.put(socket.assigns.pending, envelope["id"], :skills_list)
+        {:noreply, assign(socket, pending: pending, error: nil, result: nil)}
 
-      send_bridge(socket, :skill_mount, skill_form(params), fn ->
-        StudioBridge.mount_skill(
-          socket.assigns.connection.id,
-          socket.assigns.agent.address,
-          attrs
-        )
-      end)
-    else
-      {:error, reason} -> {:noreply, assign(socket, :error, describe(reason))}
+      {:error, reason} ->
+        {:noreply, assign(socket, :error, describe(reason))}
     end
   end
 
@@ -89,9 +83,29 @@ defmodule SpectreStudioWeb.AgentLive.Evolve do
   end
 
   @impl Phoenix.LiveView
+  def handle_info(:load_skills, socket) do
+    case StudioBridge.list_skills(socket.assigns.connection.id, socket.assigns.agent.address) do
+      {:ok, envelope} ->
+        pending = Map.put(socket.assigns.pending, envelope["id"], :skills_list)
+        {:noreply, assign(socket, pending: pending, error: nil, result: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :error, describe(reason))}
+    end
+  end
+
   def handle_info({:envelope, _connection_id, envelope}, socket) do
     case StudioBridge.response(envelope, socket.assigns.pending) do
-      {:ok, request_id, operation, data} when operation in [:skill_mount, :morph_propose] ->
+      {:ok, request_id, :skills_list, data} ->
+        skills = data |> Map.get("skills", []) |> Enum.filter(&is_map/1)
+
+        {:noreply,
+         socket
+         |> finish(request_id)
+         |> assign(:skills, skills)
+         |> assign(:result, "loaded #{length(skills)} Skills")}
+
+      {:ok, request_id, :morph_propose, data} ->
         {:noreply,
          socket
          |> finish(request_id)
@@ -114,7 +128,7 @@ defmodule SpectreStudioWeb.AgentLive.Evolve do
   def render(assigns) do
     assigns =
       assigns
-      |> assign(:can_mount_skill?, Scopes.can?(assigns.connection.manifest, :skill_create))
+      |> assign(:can_read_skills?, Scopes.can?(assigns.connection.manifest, :skill_read))
       |> assign(:can_propose_morph?, Scopes.can?(assigns.connection.manifest, :morph_create))
 
     ~H"""
@@ -126,56 +140,69 @@ defmodule SpectreStudioWeb.AgentLive.Evolve do
     >
       <.agent_header connection={@connection} agent={@agent} tab={@tab} />
 
-      <div class="mt-6 grid gap-6 xl:grid-cols-2">
-        <.term_window :if={@can_mount_skill?} title="mount runtime Skill" status="host-governed">
-          <p class="mb-5 text-[0.75rem] leading-6 t-dim">
-            The host must build a <span class="t-strong">Spectre.Skill.Definition</span>,
-            apply its Authority Envelope and mount it with revision fencing.
-          </p>
+      <div class="mt-6 space-y-6">
+        <.term_window title="Skill inventory" status={"#{length(@skills)} mounted"}>
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <p class="max-w-3xl text-[0.76rem] leading-6 t-dim">
+              Compiled and governed runtime Skills belong to the Agent Definition. Refresh reads
+              the host inventory; it does not infer Skills from routes or prompts.
+              <span :if={!@can_read_skills?} class="block mt-2 t-fail">
+                inventory locked — missing spectre.skill.read
+              </span>
+            </p>
+            <.button :if={@can_read_skills?} type="button" phx-click="refresh-skills">
+              refresh Skills
+            </.button>
+          </div>
 
-          <.form for={@skill_form} id="skill-form" phx-submit="mount-skill" class="space-y-4">
-            <div class="grid gap-4 sm:grid-cols-2">
-              <.input field={@skill_form[:subject]} label="subject" placeholder="account-123" />
-              <.input field={@skill_form[:mount_id]} label="mount id" placeholder="refunds" />
-            </div>
-            <.input
-              field={@skill_form[:definition]}
-              type="textarea"
-              rows="18"
-              label="runtime Skill definition (JSON)"
-            />
-            <.button variant="primary">create + mount Skill</.button>
-          </.form>
+          <p :if={@skills == []} class="mt-5 term-comment text-[0.78rem] t-faint">
+            no Skills loaded
+          </p>
+          <div class="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <article :for={skill <- @skills} class="border border-[var(--border)] p-4">
+              <p class="term-label">{skill["id"]}</p>
+              <p class="mt-2 break-all text-[0.72rem] t-dim">{skill["module"]}</p>
+              <p class="mt-2 text-[0.7rem] t-faint">
+                {skill["origin"]} · definition v{skill["definition_version"]}
+              </p>
+            </article>
+          </div>
         </.term_window>
 
-        <.term_window :if={@can_propose_morph?} title="new Morph proposal" status="evaluate only">
-          <p class="mb-5 text-[0.75rem] leading-6 t-dim">
-            Creates a reply-only Skill proposal and asks the host to evaluate it against
-            protected cases. Approval and activation are intentionally not part of this action.
-          </p>
+        <div>
+          <.term_window :if={@can_propose_morph?} title="new Morph proposal" status="evaluate only">
+            <p class="mb-5 text-[0.75rem] leading-6 t-dim">
+              Creates a reply-only Skill proposal and asks the host to evaluate it against
+              protected cases. Approval and activation are intentionally not part of this action.
+            </p>
 
-          <.form for={@morph_form} id="morph-form" phx-submit="propose-morph" class="space-y-4">
-            <div class="grid gap-4 sm:grid-cols-2">
-              <.input field={@morph_form[:subject]} label="subject" placeholder="account-123" />
+            <.form for={@morph_form} id="morph-form" phx-submit="propose-morph" class="space-y-4">
+              <div class="grid gap-4 sm:grid-cols-2">
+                <.input field={@morph_form[:subject]} label="subject" placeholder="account-123" />
+                <.input
+                  field={@morph_form[:action]}
+                  type="select"
+                  label="change"
+                  options={[{"mount Skill", "mount"}, {"replace Skill", "replace"}]}
+                />
+                <.input field={@morph_form[:by]} label="actor" placeholder="actor:operator" />
+                <.input field={@morph_form[:mount_id]} label="mount id" placeholder="refunds" />
+              </div>
               <.input
-                field={@morph_form[:action]}
-                type="select"
-                label="change"
-                options={[{"mount Skill", "mount"}, {"replace Skill", "replace"}]}
+                field={@morph_form[:reason]}
+                label="reason"
+                placeholder="Serve refund questions"
               />
-              <.input field={@morph_form[:by]} label="actor" placeholder="actor:operator" />
-              <.input field={@morph_form[:mount_id]} label="mount id" placeholder="refunds" />
-            </div>
-            <.input field={@morph_form[:reason]} label="reason" placeholder="Serve refund questions" />
-            <.input field={@morph_form[:match]} label="exact match" placeholder="refund" />
-            <.input field={@morph_form[:reply]} type="textarea" rows="5" label="reply template" />
-            <div class="grid gap-4 sm:grid-cols-2">
-              <.input field={@morph_form[:scopes]} label="scopes (comma separated)" />
-              <.input field={@morph_form[:token_cap]} type="number" label="token cap" min="1" />
-            </div>
-            <.button variant="primary">create + evaluate proposal</.button>
-          </.form>
-        </.term_window>
+              <.input field={@morph_form[:match]} label="exact match" placeholder="refund" />
+              <.input field={@morph_form[:reply]} type="textarea" rows="5" label="reply template" />
+              <div class="grid gap-4 sm:grid-cols-2">
+                <.input field={@morph_form[:scopes]} label="scopes (comma separated)" />
+                <.input field={@morph_form[:token_cap]} type="number" label="token cap" min="1" />
+              </div>
+              <.button variant="primary">create + evaluate proposal</.button>
+            </.form>
+          </.term_window>
+        </div>
       </div>
 
       <div :if={@error || @result} class="mt-6">
@@ -198,11 +225,10 @@ defmodule SpectreStudioWeb.AgentLive.Evolve do
     case fun.() do
       {:ok, envelope} ->
         pending = Map.put(socket.assigns.pending, envelope["id"], operation)
-        form_key = if operation == :skill_mount, do: :skill_form, else: :morph_form
 
         {:noreply,
          socket
-         |> assign(form_key, form)
+         |> assign(:morph_form, form)
          |> assign(pending: pending, error: nil, result: nil)}
 
       {:error, reason} ->
@@ -213,18 +239,6 @@ defmodule SpectreStudioWeb.AgentLive.Evolve do
   @spec finish(Phoenix.LiveView.Socket.t(), String.t()) :: Phoenix.LiveView.Socket.t()
   defp finish(socket, request_id) do
     assign(socket, pending: Map.delete(socket.assigns.pending, request_id), error: nil)
-  end
-
-  @spec skill_form(map()) :: Phoenix.HTML.Form.t()
-  defp skill_form(params \\ %{}) do
-    to_form(
-      %{
-        "subject" => Map.get(params, "subject", ""),
-        "mount_id" => Map.get(params, "mount_id", ""),
-        "definition" => Map.get(params, "definition", default_skill_definition())
-      },
-      as: :skill
-    )
   end
 
   @spec morph_form(map()) :: Phoenix.HTML.Form.t()
@@ -244,33 +258,6 @@ defmodule SpectreStudioWeb.AgentLive.Evolve do
       as: :morph
     )
   end
-
-  @spec default_skill_definition() :: String.t()
-  defp default_skill_definition do
-    Jason.encode!(
-      %{
-        "id" => "new-skill",
-        "declared_version" => 1,
-        "publisher_ref" => "spectre.studio",
-        "applicability" => %{"scopes" => ["default"], "positive" => [], "negative" => []},
-        "prompt_budget" => 128,
-        "prompt_fragments" => [],
-        "flows" => []
-      },
-      pretty: true
-    )
-  end
-
-  @spec decode_object(String.t() | nil) :: {:ok, map()} | {:error, atom()}
-  defp decode_object(value) when is_binary(value) do
-    case Jason.decode(value) do
-      {:ok, data} when is_map(data) -> {:ok, data}
-      {:ok, _other} -> {:error, :definition_must_be_an_object}
-      {:error, _reason} -> {:error, :invalid_definition_json}
-    end
-  end
-
-  defp decode_object(_value), do: {:error, :invalid_definition_json}
 
   @spec required(map(), String.t()) :: {:ok, String.t()} | {:error, term()}
   defp required(params, key) do
@@ -306,8 +293,6 @@ defmodule SpectreStudioWeb.AgentLive.Evolve do
 
   @spec describe(term()) :: String.t()
   defp describe({:required, field}), do: "#{field} is required"
-  defp describe(:invalid_definition_json), do: "Skill definition is not valid JSON"
-  defp describe(:definition_must_be_an_object), do: "Skill definition must be a JSON object"
   defp describe(reason) when is_binary(reason), do: reason
   defp describe(reason), do: inspect(reason)
 end

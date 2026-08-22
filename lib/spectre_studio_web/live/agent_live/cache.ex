@@ -22,12 +22,18 @@ defmodule SpectreStudioWeb.AgentLive.Cache do
   def mount(params, _session, socket) do
     case Shell.mount_agent(socket, params, :cache, @requirements) do
       {:ok, socket} ->
-        {:ok,
-         socket
-         |> assign(:examples, [])
-         |> assign(:pending, %{})
-         |> assign(:error, nil)
-         |> assign(:result, nil)}
+        socket =
+          socket
+          |> assign(:examples, [])
+          |> assign(:pending, %{})
+          |> assign(:error, nil)
+          |> assign(:result, nil)
+
+        if connected?(socket) and
+             Scopes.can?(socket.assigns.connection.manifest, :semantic_cache_read),
+           do: send(self(), :load_cache)
+
+        {:ok, socket}
 
       {:redirect, socket} ->
         {:ok, socket}
@@ -56,6 +62,12 @@ defmodule SpectreStudioWeb.AgentLive.Cache do
   end
 
   @impl Phoenix.LiveView
+  def handle_info(:load_cache, socket) do
+    send_bridge(socket, :cache_examples, fn ->
+      StudioBridge.cache_examples(socket.assigns.connection.id, socket.assigns.agent.address)
+    end)
+  end
+
   def handle_info({:envelope, _connection_id, envelope}, socket) do
     case StudioBridge.response(envelope, socket.assigns.pending) do
       {:ok, request_id, :cache_examples, data} ->
@@ -115,6 +127,9 @@ defmodule SpectreStudioWeb.AgentLive.Cache do
               </p>
               <p class="mt-2 t-faint">
                 Studio never loads the cache locally; the Agent host performs and authorizes the change.
+              </p>
+              <p :if={!@can_read?} class="mt-2 t-fail">
+                inspection locked — missing agent.semantic_cache.read
               </p>
             </div>
             <.button :if={@can_read?} type="button" phx-click="refresh">refresh candidates</.button>

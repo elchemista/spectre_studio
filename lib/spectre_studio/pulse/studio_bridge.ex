@@ -1,21 +1,26 @@
 defmodule SpectreStudio.Pulse.StudioBridge do
   @moduledoc """
-  Studio-owned application operations transported by Pulse envelopes.
+  Scoped Studio inspection operations transported by Pulse envelopes.
 
-  Pulse carries and authenticates the envelope but deliberately does not own
-  semantic cache, Skill runtime or Morph governance. A host that grants these
-  scopes implements the corresponding payload handlers and remains responsible
-  for subject resolution, authorization and every domain invariant.
+  Current Pulse terminates these requests at the authenticated connection
+  boundary and projects Spectre-owned data without entering an Agent turn.
+  Explicit manifest grants still decide which operations Studio may send.
   """
 
   alias SpectreStudio.Pulse.Connection
 
   @cache_examples "studio.semantic_cache.examples"
   @cache_verify "studio.semantic_cache.verify"
-  @skill_mount "studio.skill.mount"
+  @journal_turns "studio.journal.turns"
+  @skills_list "studio.skills.list"
   @morph_propose "studio.morph.propose_skill"
 
-  @type operation :: :cache_examples | :cache_verify | :skill_mount | :morph_propose
+  @type operation ::
+          :cache_examples
+          | :cache_verify
+          | :journal_turns
+          | :skills_list
+          | :morph_propose
 
   @doc "Requests bounded semantic-cache review candidates for one Agent."
   @spec cache_examples(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
@@ -34,14 +39,24 @@ defmodule SpectreStudio.Pulse.StudioBridge do
   def verify_cache_example(_connection_id, _agent_address, _example_id),
     do: {:error, :invalid_example_id}
 
-  @doc "Requests a host-governed runtime Skill mount for one Agent Instance."
-  @spec mount_skill(String.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def mount_skill(connection_id, agent_address, attrs) when is_map(attrs) do
-    request(connection_id, agent_address, @skill_mount, attrs)
+  @doc "Requests the bounded persisted turn journal for one conversation subject."
+  @spec journal_turns(String.t(), String.t(), String.t(), pos_integer()) ::
+          {:ok, map()} | {:error, term()}
+  def journal_turns(connection_id, agent_address, subject, limit \\ 50)
+
+  def journal_turns(connection_id, agent_address, subject, limit)
+      when is_binary(subject) and subject != "" and is_integer(limit) and limit > 0 do
+    query(connection_id, agent_address, @journal_turns, %{"subject" => subject, "limit" => limit})
   end
 
-  def mount_skill(_connection_id, _agent_address, _attrs),
-    do: {:error, :invalid_skill_mount}
+  def journal_turns(_connection_id, _agent_address, _subject, _limit),
+    do: {:error, :invalid_journal_request}
+
+  @doc "Requests the compiled and governed Skill inventory exposed by the host."
+  @spec list_skills(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def list_skills(connection_id, agent_address) do
+    query(connection_id, agent_address, @skills_list, %{})
+  end
 
   @doc "Requests creation and evaluation of a governed Morph Skill proposal."
   @spec propose_morph_skill(String.t(), String.t(), map()) ::
@@ -57,7 +72,8 @@ defmodule SpectreStudio.Pulse.StudioBridge do
   @spec operation(String.t()) :: operation() | nil
   def operation(@cache_examples), do: :cache_examples
   def operation(@cache_verify), do: :cache_verify
-  def operation(@skill_mount), do: :skill_mount
+  def operation(@journal_turns), do: :journal_turns
+  def operation(@skills_list), do: :skills_list
   def operation(@morph_propose), do: :morph_propose
   def operation(_type), do: nil
 

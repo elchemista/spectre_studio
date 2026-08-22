@@ -7,12 +7,6 @@ config :spectre_studio, SpectreStudioWeb.Endpoint,
   secret_key_base: "FTx5ZhTlkl0TA94mWXMTIKDFE7Gr5fNEuFtD6DjZRqcr0S3JYzrGTT7F0uU8nso5",
   server: false
 
-# In test we don't send emails
-config :spectre_studio, SpectreStudio.Mailer, adapter: Swoosh.Adapters.Test
-
-# Disable swoosh api client as it is only required for production adapters
-config :swoosh, :api_client, false
-
 # Print only warnings and errors during test
 config :logger, level: :warning
 
@@ -26,3 +20,8 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Tests get their own vault file so a run never inherits another's state.
+config :spectre_studio,
+  vault_key: "DrCdjc1835Et5J+DVL3NyMUHzaSld7Sl97XgdiJ55bk=",
+  vault_path: Path.expand("../tmp/test-vault.dets", __DIR__)

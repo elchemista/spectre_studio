@@ -8,7 +8,8 @@
 import Config
 
 config :spectre_studio,
-  generators: [timestamp_type: :utc_datetime]
+  generators: [timestamp_type: :utc_datetime],
+  max_bundle_bytes: 16_000_000
 
 # Configure the endpoint
 config :spectre_studio, SpectreStudioWeb.Endpoint,
@@ -16,7 +17,10 @@ config :spectre_studio, SpectreStudioWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
     formats: [html: SpectreStudioWeb.ErrorHTML, json: SpectreStudioWeb.ErrorJSON],
-    layout: false
+    # Error pages wear the same shell as everything else. A bare "Not Found" in
+    # the browser's default font is the one screen that tells an operator the
+    # tool is broken rather than the URL.
+    layout: {SpectreStudioWeb.Layouts, :root}
   ],
   pubsub_server: SpectreStudio.PubSub,
   live_view: [signing_salt: "e0J89X7q"]
@@ -25,15 +29,6 @@ config :spectre_studio, SpectreStudioWeb.Endpoint,
 config :phoenix_live_view,
   # the attribute set on all root tags. Used for Phoenix.LiveView.ColocatedCSS.
   root_tag_attribute: "phx-r"
-
-# Configure the mailer
-#
-# By default it uses the "Local" adapter which stores the emails
-# locally. You can see the emails in your browser, at "/dev/mailbox".
-#
-# For production it's recommended to configure a different adapter
-# at the `config/runtime.exs`.
-config :spectre_studio, SpectreStudio.Mailer, adapter: Swoosh.Adapters.Local
 
 # Configure esbuild (the version is required)
 config :esbuild,

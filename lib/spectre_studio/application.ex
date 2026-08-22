@@ -7,13 +7,17 @@ defmodule SpectreStudio.Application do
 
   @impl true
   def start(_type, _args) do
+    :ok = SpectreStudio.Config.load!()
+
     children = [
       SpectreStudioWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:spectre_studio, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: SpectreStudio.PubSub},
-      # Start a worker by calling: SpectreStudio.Worker.start_link(arg)
-      # {SpectreStudio.Worker, arg},
-      # Start to serve requests, typically the last entry
+      {Registry, keys: :unique, name: SpectreStudio.Pulse.Registry},
+      {DynamicSupervisor, strategy: :one_for_one, name: SpectreStudio.Pulse.ConnectionSupervisor},
+      SpectreStudio.Vault,
+      SpectreStudio.Lab.Library,
+      SpectreStudio.Pulse.Boot,
       SpectreStudioWeb.Endpoint
     ]
 

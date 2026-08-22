@@ -1,18 +1,9 @@
 defmodule SpectreStudioWeb.ConnCase do
   @moduledoc """
-  This module defines the test case to be used by
-  tests that require setting up a connection.
+  Test case for anything that talks to the endpoint.
 
-  Such tests rely on `Phoenix.ConnTest` and also
-  import other functionality to make it easier
-  to build common data structures and query the data layer.
-
-  Finally, if the test case interacts with the database,
-  we enable the SQL sandbox, so changes done to the database
-  are reverted at the end of every test. If you are using
-  PostgreSQL, you can even run database tests asynchronously
-  by setting `use SpectreStudioWeb.ConnCase, async: true`, although
-  this option is not recommended for other databases.
+  Studio has no database and no sign-in, so there is no sandbox and no session
+  setup here — only the conveniences for building connections.
   """
 
   use ExUnit.CaseTemplate
@@ -25,13 +16,43 @@ defmodule SpectreStudioWeb.ConnCase do
       use SpectreStudioWeb, :verified_routes
 
       # Import conveniences for testing with connections
-      import Plug.Conn
       import Phoenix.ConnTest
+      import Phoenix.LiveViewTest
+      import Plug.Conn
       import SpectreStudioWeb.ConnCase
     end
   end
 
   setup _tags do
     {:ok, conn: Phoenix.ConnTest.build_conn()}
+  end
+
+  @doc """
+  Asserts that a LiveView eventually renders `text`.
+
+  A PubSub broadcast reaches the test process and the LiveView independently, so
+  a plain `render/1` right after `assert_receive` can run before the view has
+  handled its own copy. This polls instead of guessing at a sleep.
+  """
+  def assert_eventually(live, text, timeout \\ 2_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_assert_eventually(live, text, deadline)
+  end
+
+  defp do_assert_eventually(live, text, deadline) do
+    html = Phoenix.LiveViewTest.render(live)
+
+    cond do
+      html =~ text ->
+        html
+
+      System.monotonic_time(:millisecond) < deadline ->
+        Process.sleep(25)
+        do_assert_eventually(live, text, deadline)
+
+      true ->
+        raise ExUnit.AssertionError,
+          message: "the LiveView never rendered #{inspect(text)}"
+    end
   end
 end

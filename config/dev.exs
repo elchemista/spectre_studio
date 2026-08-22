@@ -45,6 +45,12 @@ config :spectre_studio, SpectreStudioWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :spectre_studio, dev_routes: true
 
+# A fixed development vault key, replaced from the environment in production.
+# See config/runtime.exs and `mix studio.secrets`.
+config :spectre_studio,
+  vault_key: "DrCdjc1835Et5J+DVL3NyMUHzaSld7Sl97XgdiJ55bk=",
+  vault_path: Path.expand("../priv/studio/dev.dets", __DIR__)
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
 
@@ -62,6 +68,3 @@ config :phoenix_live_view,
   debug_attributes: true,
   # Enable helpful, but potentially expensive runtime checks
   enable_expensive_runtime_checks: true
-
-# Disable swoosh api client as it is only required for production adapters.
-config :swoosh, :api_client, false

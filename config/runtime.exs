@@ -55,6 +55,34 @@ if config_env() == :prod do
 
   host = System.get_env("PHX_HOST") || "example.com"
 
+  # Studio has no sign-in, so the listening address *is* the access control.
+  # It binds to loopback unless told otherwise: reach it over an SSH tunnel, or
+  # set STUDIO_BIND_IP deliberately and put your own authenticating proxy in
+  # front of it.
+  bind_ip =
+    case System.get_env("STUDIO_BIND_IP", "127.0.0.1")
+         |> String.to_charlist()
+         |> :inet.parse_address() do
+      {:ok, address} ->
+        address
+
+      {:error, _reason} ->
+        raise "STUDIO_BIND_IP is not a valid IP address"
+    end
+
+  config :spectre_studio, SpectreStudioWeb.Endpoint, http: [ip: bind_ip]
+
+  # Without a vault key Studio would have to either refuse every connection
+  # token or write it to disk in the clear, so it is required.
+  config :spectre_studio,
+    vault_key:
+      System.get_env("STUDIO_VAULT_KEY") ||
+        raise("""
+        environment variable STUDIO_VAULT_KEY is missing.
+        Generate one with: mix studio.secrets
+        """),
+    vault_path: System.get_env("STUDIO_VAULT_PATH") || "/app/priv/studio/vault.dets"
+
   config :spectre_studio, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :spectre_studio, SpectreStudioWeb.Endpoint,
@@ -99,22 +127,4 @@ if config_env() == :prod do
   #       force_ssl: [hsts: true]
   #
   # Check `Plug.SSL` for all available options in `force_ssl`.
-
-  # ## Configuring the mailer
-  #
-  # In production you need to configure the mailer to use a different adapter.
-  # Here is an example configuration for Mailgun:
-  #
-  #     config :spectre_studio, SpectreStudio.Mailer,
-  #       adapter: Swoosh.Adapters.Mailgun,
-  #       api_key: System.get_env("MAILGUN_API_KEY"),
-  #       domain: System.get_env("MAILGUN_DOMAIN")
-  #
-  # Most non-SMTP adapters require an API client. Swoosh supports Req, Hackney,
-  # and Finch out-of-the-box. This configuration is typically done at
-  # compile-time in your config/prod.exs:
-  #
-  #     config :swoosh, :api_client, Swoosh.ApiClient.Req
-  #
-  # See https://swoosh.hexdocs.pm/Swoosh.html#module-installation for details.
 end

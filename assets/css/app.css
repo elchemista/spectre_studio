@@ -1,105 +1,1075 @@
-/* See the Tailwind configuration guide for advanced usage
-   https://tailwindcss.com/docs/configuration */
-
 @import "tailwindcss" source(none);
 @import "phoenix-colocated/spectre_studio/colocated.css";
 @source "../css";
 @source "../js";
 @source "../../lib/spectre_studio_web";
-/* Required for Tailwind to automatically pick up changes in colocated CSS files in dev */
 @source "../../_build/dev/phoenix-colocated/spectre_studio/*/";
 
-/* A Tailwind plugin that makes "hero-#{ICON}" classes available.
-   The heroicons installation itself is managed by your mix.exs */
 @plugin "../vendor/heroicons";
 
-/* daisyUI Tailwind Plugin. */
-@plugin "daisyui/packages/bundle/daisyui" {
-  themes: false;
+@theme {
+  --font-sans: ui-monospace, "JetBrains Mono", "Fira Code", "SFMono-Regular", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", "SFMono-Regular", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-serif: ui-monospace, "JetBrains Mono", "Fira Code", "SFMono-Regular", Menlo, Consolas,
+    "Liberation Mono", monospace;
 }
 
-/* daisyUI theme plugin.
-  We ship with two themes, a light one inspired on Phoenix colors and a dark one inspired
-  on Elixir colors. Build your own at: https://daisyui.com/theme-generator/ */
-@plugin "daisyui/packages/bundle/daisyui-theme" {
-  name: "dark";
-  default: false;
-  prefersdark: true;
-  color-scheme: "dark";
-  --color-base-100: oklch(30.33% 0.016 252.42);
-  --color-base-200: oklch(25.26% 0.014 253.1);
-  --color-base-300: oklch(20.15% 0.012 254.09);
-  --color-base-content: oklch(97.807% 0.029 256.847);
-  --color-primary: oklch(58% 0.233 277.117);
-  --color-primary-content: oklch(96% 0.018 272.314);
-  --color-secondary: oklch(58% 0.233 277.117);
-  --color-secondary-content: oklch(96% 0.018 272.314);
-  --color-accent: oklch(60% 0.25 292.717);
-  --color-accent-content: oklch(96% 0.016 293.756);
-  --color-neutral: oklch(37% 0.044 257.287);
-  --color-neutral-content: oklch(98% 0.003 247.858);
-  --color-info: oklch(58% 0.158 241.966);
-  --color-info-content: oklch(97% 0.013 236.62);
-  --color-success: oklch(60% 0.118 184.704);
-  --color-success-content: oklch(98% 0.014 180.72);
-  --color-warning: oklch(66% 0.179 58.318);
-  --color-warning-content: oklch(98% 0.022 95.277);
-  --color-error: oklch(58% 0.253 17.585);
-  --color-error-content: oklch(96% 0.015 12.422);
-  --radius-selector: 0.25rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
-  --size-selector: 0.21875rem;
-  --size-field: 0.21875rem;
-  --border: 1.5px;
-  --depth: 1;
-  --noise: 0;
-}
-
-@plugin "daisyui/packages/bundle/daisyui-theme" {
-  name: "light";
-  default: true;
-  prefersdark: false;
-  color-scheme: "light";
-  --color-base-100: oklch(98% 0 0);
-  --color-base-200: oklch(96% 0.001 286.375);
-  --color-base-300: oklch(92% 0.004 286.32);
-  --color-base-content: oklch(21% 0.006 285.885);
-  --color-primary: oklch(70% 0.213 47.604);
-  --color-primary-content: oklch(98% 0.016 73.684);
-  --color-secondary: oklch(55% 0.027 264.364);
-  --color-secondary-content: oklch(98% 0.002 247.839);
-  --color-accent: oklch(0% 0 0);
-  --color-accent-content: oklch(100% 0 0);
-  --color-neutral: oklch(44% 0.017 285.786);
-  --color-neutral-content: oklch(98% 0 0);
-  --color-info: oklch(62% 0.214 259.815);
-  --color-info-content: oklch(97% 0.014 254.604);
-  --color-success: oklch(70% 0.14 182.503);
-  --color-success-content: oklch(98% 0.014 180.72);
-  --color-warning: oklch(66% 0.179 58.318);
-  --color-warning-content: oklch(98% 0.022 95.277);
-  --color-error: oklch(58% 0.253 17.585);
-  --color-error-content: oklch(96% 0.015 12.422);
-  --radius-selector: 0.25rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
-  --size-selector: 0.21875rem;
-  --size-field: 0.21875rem;
-  --border: 1.5px;
-  --depth: 1;
-  --noise: 0;
-}
-
-/* Add variants based on LiveView classes */
 @custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
 @custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
 @custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
-
-/* Use the data attribute for dark mode  */
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
-/* Make LiveView wrapper divs transparent for layout */
-[data-phx-session], [data-phx-teleported-src] { display: contents }
+/* ---------------------------------------------------------------------------
+   Monochrome-first terminal theme. Layout emphasis comes from contrast,
+   inversion and border weight; code uses a restrained syntax palette.
 
-/* This file is for your main application CSS */
+   Studio is a control center, so it carries one outcome the reference language
+   does not have: waiting. --state-wait joins --state-ok and --state-fail and
+   obeys the same rule — a hued tone never carries meaning alone, it is always
+   paired with a word and a glyph.
+   See docs/UI.md for the complete specification.
+   --------------------------------------------------------------------------- */
+
+:root,
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --page-bg: #050506;
+  --surface: #0b0b0d;
+  --surface-raised: #101013;
+  --surface-bar: #131317;
+  --surface-translucent: rgba(5, 5, 6, 0.86);
+  --line: #22222a;
+  --line-strong: #3b3b46;
+  --fg: #c9c9d1;
+  --fg-strong: #f5f5f7;
+  --fg-dim: #7d7d89;
+  --fg-faint: #4b4b55;
+  --grid: rgba(255, 255, 255, 0.028);
+  /* Check outcomes. Muted enough to sit inside a monochrome page, contrasted
+     enough to read on --surface. */
+  --state-ok: #8fcf9a;
+  --state-fail: #e08a8a;
+  --state-wait: #d9c48a;
+  --invert-bg: #f5f5f7;
+  --invert-fg: #050506;
+  --selection-bg: #f5f5f7;
+  --selection-fg: #050506;
+  --field-bg: #08080a;
+  --code-bg: #08080a;
+  --code-bar: #141419;
+  /* Syntax tokens. Declared once and not overridden by the light theme: code
+     keeps a dark background everywhere, so a single palette serves both. The
+     scale is anchored on the Elixir purple, with teal atoms as the only real
+     second voice; everything else stays muted so the blocks still read as part
+     of a monochrome page. */
+  --hl-keyword: #b388ff;
+  --hl-operator: #a175f0;
+  --hl-module: #d9c8ff;
+  --hl-atom: #78d9c0;
+  --hl-number: #e2a679;
+  --hl-string: #9fd18a;
+  --hl-sigil: #8ec6e8;
+  --hl-comment: #6b6b76;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --page-bg: #f4f4f2;
+  --surface: #fbfbfa;
+  --surface-raised: #ffffff;
+  --surface-bar: #ececea;
+  --surface-translucent: rgba(244, 244, 242, 0.88);
+  --line: #d9d9d4;
+  --line-strong: #a8a8a2;
+  --fg: #33332f;
+  --fg-strong: #0a0a09;
+  --fg-dim: #6f6f69;
+  --fg-faint: #9a9a94;
+  --grid: rgba(0, 0, 0, 0.035);
+  --state-ok: #2f6b3c;
+  --state-fail: #9c3a3a;
+  --state-wait: #7a6320;
+  --invert-bg: #0a0a09;
+  --invert-fg: #f7f7f5;
+  --selection-bg: #0a0a09;
+  --selection-fg: #f7f7f5;
+  /* --code-bg stays dark in both themes: it is always paired with the fixed
+     light foreground of code blocks. Anything that carries theme text must use
+     --field-bg or --surface-bar instead. */
+  --field-bg: #ffffff;
+  --code-bg: #111110;
+  --code-bar: #1e1e1c;
+}
+
+html {
+  background: var(--page-bg);
+  text-rendering: optimizeLegibility;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
+::selection {
+  background: var(--selection-bg);
+  color: var(--selection-fg);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background: var(--line-strong);
+  background-clip: content-box;
+}
+
+:focus-visible {
+  outline: 1px dashed var(--fg-strong);
+  outline-offset: 3px;
+}
+
+/* --- Shell ---------------------------------------------------------------- */
+
+.site-shell {
+  background-image:
+    linear-gradient(to right, var(--grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+  background-size: 46px 46px;
+  background-position: center top;
+}
+
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 100;
+  transform: translateY(-200%);
+  border: 1px solid var(--line-strong);
+  background: var(--invert-bg);
+  color: var(--invert-fg);
+  padding: 0.6rem 0.9rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  transition: transform 140ms ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* --- Text tones ------------------------------------------------------------
+   Registered as Tailwind utilities so variants (hover:, focus:, …) work. */
+
+@utility t-strong {
+  color: var(--fg-strong);
+}
+
+@utility t-body {
+  color: var(--fg);
+}
+
+@utility t-dim {
+  color: var(--fg-dim);
+}
+
+@utility t-faint {
+  color: var(--fg-faint);
+}
+
+@utility t-invert {
+  background-color: var(--invert-bg);
+  color: var(--invert-fg);
+}
+
+/* The only two hued text tones outside code. They report an upstream check
+   result, and are always paired with a word and a glyph so the meaning survives
+   without colour. */
+
+@utility t-ok {
+  color: var(--state-ok);
+}
+
+@utility t-fail {
+  color: var(--state-fail);
+}
+
+/* --- Terminal window ------------------------------------------------------ */
+
+.term-window {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.term-window--raised {
+  background: var(--surface-raised);
+}
+
+.term-window--link:hover {
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 1px var(--line), 0 18px 50px -30px rgba(0, 0, 0, 0.9);
+  transform: translateY(-2px);
+}
+
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--line);
+  border-top-left-radius: 0.5rem;
+  border-top-right-radius: 0.5rem;
+  background: var(--surface-bar);
+  padding: 0.5rem 0.85rem;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+}
+
+.term-dots {
+  display: flex;
+  flex: none;
+  gap: 0.35rem;
+}
+
+.term-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 9999px;
+}
+
+.term-window--link:hover .term-dot:first-child {
+  background: var(--fg-dim);
+}
+
+.term-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-body {
+  padding: 1.15rem 1.15rem 1.25rem;
+}
+
+/* --- Prompt, cursor, chips ------------------------------------------------ */
+
+.term-prompt::before {
+  content: "$ ";
+  color: var(--fg-faint);
+}
+
+.term-out::before {
+  content: "› ";
+  color: var(--fg-faint);
+}
+
+.term-comment::before {
+  content: "// ";
+  color: var(--fg-faint);
+}
+
+.term-cursor {
+  display: inline-block;
+  width: 0.5em;
+  height: 1.05em;
+  translate: 0 0.16em;
+  background: var(--fg-strong);
+  animation: term-blink 1.05s steps(1) infinite;
+}
+
+@keyframes term-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.term-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  color: var(--fg-dim);
+  transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease;
+}
+
+a.term-chip:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-bar);
+  color: var(--fg-strong);
+}
+
+.term-chip--active {
+  border-color: var(--line-strong);
+  background: var(--invert-bg);
+  color: var(--invert-fg);
+}
+
+a.term-chip--active:hover {
+  background: var(--invert-bg);
+  color: var(--invert-fg);
+}
+
+.term-rule {
+  border: 0;
+  border-top: 1px dashed var(--line);
+}
+
+/* --- Flash notices -------------------------------------------------------- */
+
+.term-flash {
+  animation: term-flash-in 200ms ease-out;
+  box-shadow: 0 24px 60px -30px rgba(0, 0, 0, 0.95);
+}
+
+@keyframes term-flash-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.6rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- Controls ------------------------------------------------------------- */
+
+.term-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.35rem;
+  background: transparent;
+  padding: 0.5rem 1rem;
+  color: var(--fg-strong);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.term-btn:hover {
+  background: var(--surface-bar);
+  border-color: var(--fg-dim);
+}
+
+.term-btn--primary {
+  border-color: var(--invert-bg);
+  background: var(--invert-bg);
+  color: var(--invert-fg);
+}
+
+.term-btn--primary:hover {
+  background: transparent;
+  border-color: var(--fg-strong);
+  color: var(--fg-strong);
+}
+
+.term-btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.term-field {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--field-bg);
+  padding: 0.6rem 0.75rem;
+  color: var(--fg-strong);
+  font-family: inherit;
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.term-field::placeholder {
+  color: var(--fg-faint);
+}
+
+.term-field:focus {
+  border-color: var(--fg-dim);
+  box-shadow: 0 0 0 1px var(--fg-dim);
+  outline: none;
+}
+
+.term-field--error,
+.term-field--error:focus {
+  border-color: var(--fg-strong);
+  box-shadow: 0 0 0 1px var(--fg-strong);
+}
+
+.term-field:disabled,
+.term-field[readonly] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Native pickers: keep the chrome inside the terminal palette. */
+.term-field[type="color"] {
+  width: 4rem;
+  height: 2.5rem;
+  padding: 0.25rem;
+  cursor: pointer;
+}
+
+.term-field[type="file"] {
+  padding: 0.4rem;
+  color: var(--fg-dim);
+}
+
+.term-field::file-selector-button {
+  margin-right: 0.65rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.25rem;
+  background: transparent;
+  padding: 0.3rem 0.65rem;
+  color: var(--fg-strong);
+  font-family: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+
+.term-field::file-selector-button:hover {
+  background: var(--surface-bar);
+}
+
+.term-field::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  filter: invert(0.6);
+}
+
+/* Select: the native arrow never matches, so we draw our own. */
+.term-select {
+  position: relative;
+  display: block;
+}
+
+.term-select > select {
+  appearance: none;
+  padding-right: 2.25rem;
+}
+
+.term-select::after {
+  content: "▾";
+  position: absolute;
+  top: 50%;
+  right: 0.85rem;
+  translate: 0 -50%;
+  color: var(--fg-dim);
+  font-size: 0.7rem;
+  pointer-events: none;
+}
+
+.term-select > select[multiple] {
+  padding-right: 0.75rem;
+}
+
+.term-select:has(select[multiple])::after {
+  content: none;
+}
+
+.term-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+/* Checkbox drawn as an ASCII toggle: [ ] / [x]. */
+.term-check {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  color: var(--fg);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.term-check input[type="checkbox"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.term-check__box {
+  flex: none;
+  color: var(--fg-dim);
+  transition: color 140ms ease;
+}
+
+.term-check__box::before {
+  content: "[ ]";
+}
+
+.term-check input[type="checkbox"]:checked ~ .term-check__box {
+  color: var(--fg-strong);
+}
+
+.term-check input[type="checkbox"]:checked ~ .term-check__box::before {
+  content: "[x]";
+}
+
+.term-check:hover .term-check__box {
+  color: var(--fg-strong);
+}
+
+.term-check input[type="checkbox"]:focus-visible ~ .term-check__box {
+  outline: 1px dashed var(--fg-strong);
+  outline-offset: 2px;
+}
+
+.term-check input[type="checkbox"]:disabled ~ * {
+  opacity: 0.45;
+}
+
+/* --- Standalone code block ------------------------------------------------
+   Same treatment as .article-prose pre, for code outside rendered Markdown. */
+
+.term-code {
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--code-bg);
+  padding: 0;
+  color: #e6e6ea;
+  line-height: 1.7;
+}
+
+.term-code::before {
+  content: "● ● ●";
+  display: block;
+  position: sticky;
+  left: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--code-bar);
+  padding: 0.5rem 0.9rem;
+  color: #55555f;
+  font-size: 0.55rem;
+  letter-spacing: 0.3em;
+  line-height: 1.4;
+}
+
+.term-code > code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  padding: 1.05rem 1.15rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+/* --- Table and data list -------------------------------------------------- */
+
+.term-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--fg);
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.term-table th {
+  border: 1px solid var(--line);
+  background: var(--surface-bar);
+  padding: 0.5rem 0.75rem;
+  color: var(--fg-dim);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.term-table td {
+  border: 1px solid var(--line);
+  padding: 0.55rem 0.75rem;
+}
+
+.term-table tbody tr:hover td {
+  background: var(--surface-bar);
+  color: var(--fg-strong);
+}
+
+.term-list {
+  border-top: 1px dashed var(--line);
+  font-size: 0.78rem;
+}
+
+.term-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px dashed var(--line);
+  padding: 0.6rem 0;
+}
+
+.term-list__key {
+  color: var(--fg-faint);
+  letter-spacing: 0.08em;
+}
+
+.term-list__key::before {
+  content: "› ";
+}
+
+.term-list__value {
+  color: var(--fg-strong);
+}
+
+/* --- Syntax highlighting --------------------------------------------------
+   Token classes emitted by assets/js/highlight.js, for both Markdown code
+   fences and .term-code blocks. Colours come from the --hl-* scale declared
+   with the dark theme; see the note there for why they are not themed. Bare or
+   unsupported fences use the safe Elixir fallback from the highlighter. */
+
+pre .hl-keyword {
+  color: var(--hl-keyword);
+  font-weight: 600;
+}
+
+pre .hl-operator {
+  color: var(--hl-operator);
+}
+
+pre .hl-module {
+  color: var(--hl-module);
+  font-weight: 500;
+}
+
+pre .hl-atom,
+pre .hl-map-key {
+  color: var(--hl-atom);
+}
+
+pre .hl-number {
+  color: var(--hl-number);
+}
+
+pre .hl-string {
+  color: var(--hl-string);
+}
+
+pre .hl-sigil,
+pre .hl-binary {
+  color: var(--hl-sigil);
+}
+
+pre .hl-comment {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+
+
+/* --- Studio extensions -----------------------------------------------------
+   A control center shows series, saturation and values that change every
+   second. These eight components add that vocabulary without introducing a
+   colour, radius or scale the reference language does not already use.
+   Specification: docs/UI.md
+   --------------------------------------------------------------------------- */
+
+/* Every number that updates over time. Without tabular figures a live metric
+   changes width on each sample and the whole row dances. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Status LED ----------------------------------------------------------- */
+
+.term-led {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
+}
+
+.term-led::before {
+  content: "○";
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--fg-faint);
+}
+
+.term-led--ok::before {
+  content: "●";
+  color: var(--state-ok);
+}
+
+.term-led--fail::before {
+  content: "●";
+  color: var(--state-fail);
+}
+
+.term-led--wait::before {
+  content: "◐";
+  color: var(--state-wait);
+  animation: term-blink 1.05s steps(1) infinite;
+}
+
+.term-led--ok {
+  color: var(--fg);
+}
+
+.term-led--fail {
+  color: var(--state-fail);
+}
+
+.term-led--wait {
+  color: var(--state-wait);
+}
+
+/* --- Metric --------------------------------------------------------------- */
+
+.term-metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.term-metric__label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+.term-metric__value {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 1.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--fg-strong);
+}
+
+.term-metric__unit {
+  font-size: 0.8rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--fg-dim);
+}
+
+.term-metric__note {
+  font-size: 0.68rem;
+  color: var(--fg-faint);
+}
+
+.term-metric--idle .term-metric__value {
+  color: var(--fg-faint);
+}
+
+/* --- Sparkline ------------------------------------------------------------ */
+
+.term-spark {
+  display: block;
+  width: 100%;
+  height: 2rem;
+  overflow: visible;
+}
+
+.term-spark__line {
+  fill: none;
+  stroke: var(--fg-dim);
+  stroke-width: 1;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* An observation gap is drawn as a broken dashed segment. It is never
+   interpolated: the reader must see that the samples are missing. */
+.term-spark__gap {
+  fill: none;
+  stroke: var(--fg-faint);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.term-spark__head {
+  fill: var(--fg-strong);
+}
+
+.term-spark__empty {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+  vector-effect: non-scaling-stroke;
+}
+
+/* --- Gauge ---------------------------------------------------------------- */
+
+.term-gauge {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.78rem;
+}
+
+.term-gauge__bar {
+  letter-spacing: 0.05em;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.term-gauge__fill {
+  color: var(--fg-strong);
+}
+
+.term-gauge__half {
+  color: var(--fg-dim);
+}
+
+.term-gauge--saturated .term-gauge__fill,
+.term-gauge--saturated .term-gauge__half {
+  color: var(--state-fail);
+}
+
+.term-gauge__value {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-dim);
+}
+
+/* --- Left rail ------------------------------------------------------------ */
+
+.term-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+}
+
+.term-rail__group {
+  margin-top: 0.9rem;
+  color: var(--fg-faint);
+  letter-spacing: 0.06em;
+}
+
+.term-rail__group:first-child {
+  margin-top: 0;
+}
+
+.term-rail__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.25rem;
+  padding: 0.3rem 0.4rem;
+  color: var(--fg-dim);
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.term-rail__item:hover {
+  background: var(--surface-bar);
+  color: var(--fg-strong);
+}
+
+.term-rail__item[aria-current="page"] {
+  color: var(--fg-strong);
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 4px;
+}
+
+/* --- Tabs ----------------------------------------------------------------- */
+
+.term-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--fg-faint);
+}
+
+.term-tabs__sep {
+  color: var(--fg-faint);
+  user-select: none;
+}
+
+.term-tab {
+  border-radius: 0.2rem;
+  padding: 0.15rem 0.25rem;
+  color: var(--fg-dim);
+  transition: color 160ms ease;
+}
+
+.term-tab:hover {
+  color: var(--fg-strong);
+}
+
+.term-tab[aria-selected="true"] {
+  color: var(--fg-strong);
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 4px;
+}
+
+/* --- Event stream --------------------------------------------------------- */
+
+.term-stream {
+  max-height: 18rem;
+  overflow-y: auto;
+  border-top: 1px dashed var(--line);
+  font-size: 0.72rem;
+  line-height: 1.7;
+}
+
+.term-stream:has(.term-stream__row) [data-stream-empty] {
+  display: none;
+}
+
+.term-stream__row {
+  display: grid;
+  grid-template-columns: 5.5rem 1.25rem 1fr;
+  gap: 0.5rem;
+  border-bottom: 1px dashed var(--line);
+  padding: 0.35rem 0;
+}
+
+.term-stream__time {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+.term-stream__glyph {
+  color: var(--fg-faint);
+  text-align: center;
+}
+
+.term-stream__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}
+
+.term-stream__row--sent .term-stream__text {
+  color: var(--fg-strong);
+}
+
+.term-stream__row--note .term-stream__text {
+  color: var(--fg-dim);
+}
+
+.term-stream__row--fail .term-stream__glyph,
+.term-stream__row--fail .term-stream__text {
+  color: var(--state-fail);
+}
+
+/* --- Diff ----------------------------------------------------------------- */
+
+.term-diff {
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+
+.term-diff__row {
+  display: grid;
+  grid-template-columns: 1.25rem 1fr;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+}
+
+/* The colour lives on the glyph only. A long diff must not become a wall of
+   green and red backgrounds. */
+.term-diff__glyph {
+  color: var(--fg-faint);
+  text-align: center;
+}
+
+.term-diff__row--added .term-diff__glyph {
+  color: var(--state-ok);
+}
+
+.term-diff__row--removed .term-diff__glyph {
+  color: var(--state-fail);
+}
+
+.term-diff__row--changed .term-diff__glyph {
+  color: var(--fg-strong);
+}
+
+.term-diff__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}
+
+/* --- Scope badge ---------------------------------------------------------- */
+
+/* A withheld scope is shown, not hidden: the operator must see why an action is
+   unavailable. It reads as absent through a dashed border and a faint tone. */
+.term-chip--withheld {
+  border-style: dashed;
+  color: var(--fg-faint);
+}
+
+[data-phx-session],
+[data-phx-teleported-src] {
+  display: contents;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -173,6 +173,33 @@ defmodule SpectreStudio.FakePulse do
     def terminate(_reason, _state), do: :ok
 
     defp enable(kind, frame, state) do
+      subject = Map.get(frame, "subject")
+
+      cond do
+        subject == Keyword.get(state.opts, :reject_subject) -> reject_enable(kind, frame, state)
+        subject == Keyword.get(state.opts, :ignore_subject) -> {:ok, state}
+        true -> accept_enable(kind, frame, state)
+      end
+    end
+
+    defp reject_enable(kind, frame, state) do
+      response =
+        encode(%{
+          "type" => "error",
+          "error" => %{
+            "kind" => "routing",
+            "outcome" => "not_sent",
+            "code" => "instance_not_found",
+            "message_id" => nil,
+            "monitor" => Atom.to_string(kind),
+            "request_id" => Map.get(frame, "request_id")
+          }
+        })
+
+      {:push, {:text, response}, state}
+    end
+
+    defp accept_enable(kind, frame, state) do
       counter = state.counter + 1
       subscription_id = "sub-#{counter}"
       interval = Map.get(frame, "interval_ms", 1000)

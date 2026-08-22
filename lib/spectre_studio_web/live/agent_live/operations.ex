@@ -28,6 +28,7 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
          |> assign(:subscription_id, nil)
          |> assign(:subscription, nil)
          |> assign(:pending?, false)
+         |> assign(:pending_request_id, nil)
          |> assign(:error, nil)
          |> assign(:intervals, @intervals)
          |> assign(:durations, @durations)
@@ -56,10 +57,11 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
       ]
 
       case Connection.enable_operations_monitor(socket.assigns.connection.id, opts) do
-        {:ok, _request_id} ->
+        {:ok, request_id} ->
           {:noreply,
            socket
            |> assign(:pending?, true)
+           |> assign(:pending_request_id, request_id)
            |> assign(:error, nil)
            |> assign(:form, operations_form(params))}
 
@@ -72,9 +74,31 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
   def handle_event("disable", _params, socket), do: {:noreply, disable(socket)}
 
   @impl Phoenix.LiveView
-  def handle_info({:operations_monitor_enabled, _id, _request_id, subscription_id}, socket) do
-    {:noreply, assign(socket, subscription_id: subscription_id, pending?: false, error: nil)}
+  def handle_info(
+        {:operations_monitor_enabled, _id, request_id, subscription_id},
+        %{assigns: %{pending_request_id: request_id}} = socket
+      ) do
+    {:noreply,
+     assign(socket,
+       subscription_id: subscription_id,
+       pending?: false,
+       pending_request_id: nil,
+       error: nil
+     )}
   end
+
+  def handle_info({:operations_monitor_enabled, _id, _request_id, _subscription_id}, socket),
+    do: {:noreply, socket}
+
+  def handle_info(
+        {:operations_monitor_failed, _id, request_id, error},
+        %{assigns: %{pending_request_id: request_id}} = socket
+      ) do
+    {:noreply, assign(socket, pending?: false, pending_request_id: nil, error: describe(error))}
+  end
+
+  def handle_info({:operations_monitor_failed, _id, _request_id, _error}, socket),
+    do: {:noreply, socket}
 
   def handle_info({:operations_monitor_update, _id, subscription_id, subscription}, socket) do
     if subscription_id == socket.assigns.subscription_id do
@@ -218,7 +242,8 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
   end
 
   @spec disable(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
-  defp disable(%{assigns: %{subscription_id: nil}} = socket), do: assign(socket, :pending?, false)
+  defp disable(%{assigns: %{subscription_id: nil}} = socket),
+    do: assign(socket, pending?: false, pending_request_id: nil)
 
   defp disable(socket) do
     Connection.disable_monitor(socket.assigns.connection.id, socket.assigns.subscription_id)
@@ -234,7 +259,12 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
 
   @spec clear_subscription(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
   defp clear_subscription(socket) do
-    assign(socket, subscription_id: nil, subscription: nil, pending?: false)
+    assign(socket,
+      subscription_id: nil,
+      subscription: nil,
+      pending?: false,
+      pending_request_id: nil
+    )
   end
 
   @spec operations_form(map()) :: Phoenix.HTML.Form.t()
@@ -294,6 +324,7 @@ defmodule SpectreStudioWeb.AgentLive.Operations do
 
   @spec describe(term()) :: String.t()
   defp describe(:not_ready), do: "the connection is not ready"
+  defp describe(%{} = error), do: "#{error["kind"] || "request"}/#{error["code"] || "unknown"}"
   defp describe(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp describe(reason), do: inspect(reason)
 end

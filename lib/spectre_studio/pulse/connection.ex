@@ -136,6 +136,7 @@ defmodule SpectreStudio.Pulse.Connection do
     state =
       state
       |> notify_subscriptions_lost()
+      |> notify_pending_lost()
       |> cancel_reconnect()
       |> close_socket()
       |> log(:sent, "disconnect requested")
@@ -264,6 +265,7 @@ defmodule SpectreStudio.Pulse.Connection do
     state =
       state
       |> notify_subscriptions_lost()
+      |> notify_pending_lost()
       |> Map.put(:subscriptions, %{})
       |> Map.put(:pending, %{})
       |> Map.put(:manifest, nil)
@@ -374,6 +376,7 @@ defmodule SpectreStudio.Pulse.Connection do
     state
     |> Map.put(:last_error, "#{kind}/#{code}")
     |> log(:fail, "error #{kind}/#{code}")
+    |> reject_pending_monitor(error)
   end
 
   defp apply_envelope(envelope, state) do
@@ -605,6 +608,37 @@ defmodule SpectreStudio.Pulse.Connection do
     end)
 
     state
+  end
+
+  @spec notify_pending_lost(map()) :: map()
+  defp notify_pending_lost(state) do
+    error = %{"kind" => "transport", "code" => "connection_lost"}
+
+    Enum.each(state.pending, fn {request_id, pending} ->
+      broadcast_monitor_failed(state, pending, request_id, error)
+    end)
+
+    state
+  end
+
+  @spec reject_pending_monitor(map(), map()) :: map()
+  defp reject_pending_monitor(state, error) do
+    request_id = Map.get(error, "request_id")
+
+    case Map.pop(state.pending, request_id) do
+      {nil, _pending} ->
+        state
+
+      {pending, remaining} ->
+        broadcast_monitor_failed(state, pending, request_id, error)
+        %{state | pending: remaining}
+    end
+  end
+
+  @spec broadcast_monitor_failed(map(), map(), term(), map()) :: :ok
+  defp broadcast_monitor_failed(state, pending, request_id, error) do
+    event = if pending.kind == :runtime, do: :monitor_failed, else: :operations_monitor_failed
+    broadcast(state, {event, state.spec.id, request_id, error})
   end
 
   defp disable_owned_by(pid, state) do

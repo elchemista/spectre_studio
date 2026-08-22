@@ -246,6 +246,64 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
     end
   end
 
+  describe "when Pulse rejects the requested Instance" do
+    setup do
+      scopes = [
+        "agent.runtime.read",
+        "agent.runtime.stream",
+        "agent.operations.read",
+        "agent.operations.stream"
+      ]
+
+      {:ok,
+       spec:
+         connected_endpoint(
+           scopes: scopes,
+           reject_subject: "missing-instance"
+         )}
+    end
+
+    test "the runtime panel leaves enabling and displays the correlated error", %{
+      conn: conn,
+      spec: spec
+    } do
+      {:ok, live, _html} = live(conn, agent_path(spec, :monitor))
+
+      live
+      |> form("#monitor-form", %{
+        "monitor" => %{"subject" => "missing-instance", "interval_ms" => "1000"}
+      })
+      |> render_submit()
+
+      assert_eventually(live, "routing/instance_not_found")
+      html = render(live)
+      refute html =~ "enabling…"
+      assert html =~ "enable live"
+    end
+
+    test "the Work/Vigil panel leaves enabling and displays the correlated error", %{
+      conn: conn,
+      spec: spec
+    } do
+      {:ok, live, _html} = live(conn, agent_path(spec, :operations))
+
+      live
+      |> form("#operations-form", %{
+        "operations" => %{
+          "subject" => "missing-instance",
+          "kinds" => "all",
+          "interval_ms" => "1000"
+        }
+      })
+      |> render_submit()
+
+      assert_eventually(live, "routing/instance_not_found")
+      html = render(live)
+      refute html =~ "enabling…"
+      assert html =~ "watch Work / Vigil"
+    end
+  end
+
   describe "with semantic-cache review scopes" do
     setup do
       scopes = ["agent.semantic_cache.read", "agent.semantic_cache.promote"]

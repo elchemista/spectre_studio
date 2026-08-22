@@ -41,6 +41,7 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
          |> assign(:subscription_id, nil)
          |> assign(:subscription, nil)
          |> assign(:pending?, false)
+         |> assign(:pending_request_id, nil)
          |> assign(:error, nil)
          |> assign(:fields, Connection.default_fields())
          |> assign(:intervals, @intervals)
@@ -68,13 +69,14 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
       ]
 
       case Connection.enable_monitor(socket.assigns.connection.id, opts) do
-        {:ok, _request_id} ->
+        {:ok, request_id} ->
           # The subscription id only exists once the host replies. Until then the
           # control reports the request in flight — leaving it on "enable" invites
           # a second click and a second subscription for the same panel.
           {:noreply,
            socket
            |> assign(:pending?, true)
+           |> assign(:pending_request_id, request_id)
            |> assign(:error, nil)
            |> assign(:form, monitor_form(params))}
 
@@ -87,9 +89,31 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
   def handle_event("disable", _params, socket), do: {:noreply, disable(socket)}
 
   @impl Phoenix.LiveView
-  def handle_info({:monitor_enabled, _id, _request_id, subscription_id}, socket) do
-    {:noreply, assign(socket, subscription_id: subscription_id, pending?: false, error: nil)}
+  def handle_info(
+        {:monitor_enabled, _id, request_id, subscription_id},
+        %{assigns: %{pending_request_id: request_id}} = socket
+      ) do
+    {:noreply,
+     assign(socket,
+       subscription_id: subscription_id,
+       pending?: false,
+       pending_request_id: nil,
+       error: nil
+     )}
   end
+
+  def handle_info({:monitor_enabled, _id, _request_id, _subscription_id}, socket),
+    do: {:noreply, socket}
+
+  def handle_info(
+        {:monitor_failed, _id, request_id, error},
+        %{assigns: %{pending_request_id: request_id}} = socket
+      ) do
+    {:noreply, assign(socket, pending?: false, pending_request_id: nil, error: describe(error))}
+  end
+
+  def handle_info({:monitor_failed, _id, _request_id, _error}, socket),
+    do: {:noreply, socket}
 
   def handle_info({:monitor_update, _id, subscription_id, subscription}, socket) do
     if subscription_id == socket.assigns.subscription_id do
@@ -101,7 +125,13 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
 
   def handle_info({:monitor_ended, _id, subscription_id}, socket) do
     if subscription_id == socket.assigns.subscription_id do
-      {:noreply, assign(socket, subscription_id: nil, subscription: nil, pending?: false)}
+      {:noreply,
+       assign(socket,
+         subscription_id: nil,
+         subscription: nil,
+         pending?: false,
+         pending_request_id: nil
+       )}
     else
       {:noreply, socket}
     end
@@ -113,7 +143,12 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
       # dead and a fresh enable has to be an explicit act.
       {:noreply,
        socket
-       |> assign(subscription_id: nil, subscription: nil, pending?: false)
+       |> assign(
+         subscription_id: nil,
+         subscription: nil,
+         pending?: false,
+         pending_request_id: nil
+       )
        |> assign(:error, "connection lost — the subscription ended with it")}
     else
       {:noreply, socket}
@@ -136,11 +171,18 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
     :ok
   end
 
-  defp disable(%{assigns: %{subscription_id: nil}} = socket), do: assign(socket, :pending?, false)
+  defp disable(%{assigns: %{subscription_id: nil}} = socket),
+    do: assign(socket, pending?: false, pending_request_id: nil)
 
   defp disable(socket) do
     Connection.disable_monitor(socket.assigns.connection.id, socket.assigns.subscription_id)
-    assign(socket, subscription_id: nil, subscription: nil, pending?: false)
+
+    assign(socket,
+      subscription_id: nil,
+      subscription: nil,
+      pending?: false,
+      pending_request_id: nil
+    )
   end
 
   defp monitor_form(params \\ %{}) do
@@ -165,6 +207,7 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
 
   defp describe(:not_ready), do: "the connection is not ready"
   defp describe(:not_connected), do: "the socket is closed"
+  defp describe(%{} = error), do: "#{error["kind"] || "request"}/#{error["code"] || "unknown"}"
   defp describe(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp describe(reason), do: inspect(reason)
 

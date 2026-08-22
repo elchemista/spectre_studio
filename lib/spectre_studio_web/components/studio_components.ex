@@ -352,7 +352,13 @@ defmodule SpectreStudioWeb.StudioComponents do
         >
           <span class="term-stream__time">{format_time(event.at)}</span>
           <span class="term-stream__glyph" aria-hidden="true">{stream_glyph(event.kind)}</span>
-          <span class="term-stream__text">{event.text}</span>
+          <span class="term-stream__text">
+            {event.text}
+            <pre
+              :if={Map.get(event, :details)}
+              class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[0.66rem] t-dim"
+            >{Jason.encode!(event.details, pretty: true)}</pre>
+          </span>
         </div>
       </div>
     </div>

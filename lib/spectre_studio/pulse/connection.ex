@@ -91,6 +91,11 @@ defmodule SpectreStudio.Pulse.Connection do
   def enable_operations_monitor(id, opts),
     do: call(id, {:enable_monitor, :operations, opts, self()})
 
+  @doc "Refreshes the live Instance inventory for one exposed Agent."
+  @spec refresh_instances(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def refresh_instances(id, agent_address),
+    do: call(id, {:refresh_instances, agent_address})
+
   @doc "Sends one Pulse envelope to an Agent."
   @spec send_envelope(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def send_envelope(id, opts), do: call(id, {:send_envelope, opts})
@@ -123,6 +128,8 @@ defmodule SpectreStudio.Pulse.Connection do
       reconnect_ref: nil,
       subscriptions: %{},
       pending: %{},
+      pending_instances: %{},
+      instances: %{},
       owners: %{},
       sent: %{},
       events: [],
@@ -141,12 +148,22 @@ defmodule SpectreStudio.Pulse.Connection do
       state
       |> notify_subscriptions_lost()
       |> notify_pending_lost()
+      |> notify_pending_instances_lost()
       |> cancel_reconnect()
       |> close_socket()
       |> log(:sent, "disconnect requested")
       |> transition(:closed)
 
-    {:noreply, %{state | attempt: 0, manifest: nil, subscriptions: %{}, pending: %{}}}
+    {:noreply,
+     %{
+       state
+       | attempt: 0,
+         manifest: nil,
+         subscriptions: %{},
+         pending: %{},
+         pending_instances: %{},
+         instances: %{}
+     }}
   end
 
   @impl GenServer
@@ -197,6 +214,26 @@ defmodule SpectreStudio.Pulse.Connection do
 
       {:reply, {:ok, envelope}, state}
     else
+      status when is_atom(status) -> {:reply, {:error, :not_ready}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:refresh_instances, agent_address}, _from, state) do
+    request_id = Frame.uuid7()
+
+    with :ready <- state.status,
+         true <- exposed_agent?(state, agent_address),
+         {:ok, frame} <- Frame.instances_list(request_id, agent_address),
+         :ok <- push(state, frame) do
+      next =
+        state
+        |> Map.update!(:pending_instances, &Map.put(&1, request_id, agent_address))
+        |> log(:sent, "instances.list #{short_address(agent_address)}")
+
+      {:reply, {:ok, request_id}, next}
+    else
+      false -> {:reply, {:error, :agent_not_exposed}, state}
       status when is_atom(status) -> {:reply, {:error, :not_ready}, state}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -270,8 +307,11 @@ defmodule SpectreStudio.Pulse.Connection do
       state
       |> notify_subscriptions_lost()
       |> notify_pending_lost()
+      |> notify_pending_instances_lost()
       |> Map.put(:subscriptions, %{})
       |> Map.put(:pending, %{})
+      |> Map.put(:pending_instances, %{})
+      |> Map.put(:instances, %{})
       |> Map.put(:manifest, nil)
 
     case {state.status, terminal?(reason)} do
@@ -342,6 +382,7 @@ defmodule SpectreStudio.Pulse.Connection do
       {:ok, {:manifest, frame}} -> apply_manifest(frame, state)
       {:ok, {:receipt, receipt}} -> apply_receipt(receipt, state)
       {:ok, {:error, error}} -> apply_error(error, state)
+      {:ok, {:instances, frame}} -> apply_instances(frame, state)
       {:ok, {:monitor, kind, event, frame}} -> apply_monitor(kind, event, frame, state)
       {:ok, {:envelope, envelope}} -> apply_envelope(envelope, state)
       {:ok, {:unknown, _frame}} -> log(state, :note, "unrecognised frame ignored")
@@ -381,14 +422,45 @@ defmodule SpectreStudio.Pulse.Connection do
     |> Map.put(:last_error, "#{kind}/#{code}")
     |> log(:fail, "error #{kind}/#{code}")
     |> reject_pending_monitor(error)
+    |> reject_pending_instances(error)
+  end
+
+  defp apply_instances(frame, state) do
+    request_id = Map.get(frame, "request_id")
+    agent_address = Map.get(frame, "agent_address")
+
+    case Map.pop(state.pending_instances, request_id) do
+      {^agent_address, remaining} when is_binary(agent_address) ->
+        instances = frame |> Map.get("instances", []) |> normalize_instances()
+
+        state = %{
+          state
+          | pending_instances: remaining,
+            instances: Map.put(state.instances, agent_address, instances)
+        }
+
+        broadcast(state, {:instances_changed, state.spec.id, agent_address, instances})
+
+        log(
+          state,
+          :received,
+          "instances.list #{short_address(agent_address)} · #{length(instances)} live"
+        )
+
+      {_unknown, remaining} ->
+        %{state | pending_instances: remaining}
+    end
   end
 
   defp apply_envelope(envelope, state) do
     from = Map.get(envelope, "from", "unknown")
     type = get_in(envelope, ["payload", "type"]) || "unknown"
+    data = get_in(envelope, ["payload", "data"])
+    kind = if failure_envelope?(type), do: :fail, else: :received
+    state = observe_subject(state, from, type, data)
 
     broadcast(state, {:envelope, state.spec.id, envelope})
-    log(state, :received, "#{from} · #{type}")
+    log(state, kind, envelope_summary(from, type, data), public_details(data))
   end
 
   # --- monitoring ------------------------------------------------------------
@@ -640,6 +712,29 @@ defmodule SpectreStudio.Pulse.Connection do
     end
   end
 
+  defp reject_pending_instances(state, error) do
+    request_id = Map.get(error, "request_id")
+
+    case Map.pop(state.pending_instances, request_id) do
+      {nil, _pending} ->
+        state
+
+      {agent_address, remaining} ->
+        broadcast(state, {:instances_failed, state.spec.id, agent_address, error})
+        %{state | pending_instances: remaining}
+    end
+  end
+
+  defp notify_pending_instances_lost(state) do
+    error = %{"kind" => "transport", "code" => "connection_lost"}
+
+    Enum.each(state.pending_instances, fn {_request_id, agent_address} ->
+      broadcast(state, {:instances_failed, state.spec.id, agent_address, error})
+    end)
+
+    state
+  end
+
   @spec broadcast_monitor_failed(map(), map(), term(), map()) :: :ok
   defp broadcast_monitor_failed(state, pending, request_id, error) do
     event = if pending.kind == :runtime, do: :monitor_failed, else: :operations_monitor_failed
@@ -761,6 +856,7 @@ defmodule SpectreStudio.Pulse.Connection do
       last_error: state.last_error,
       attempt: state.attempt,
       events: state.events,
+      instances: state.instances,
       subscriptions:
         Map.new(state.subscriptions, fn {id, subscription} ->
           {id, public_subscription(subscription)}
@@ -842,9 +938,18 @@ defmodule SpectreStudio.Pulse.Connection do
 
   # Every event carries a stable id so the UI can stream it into the DOM instead
   # of re-rendering the whole log on each line.
-  defp log(state, kind, text) do
+  defp log(state, kind, text, details \\ nil) do
     seq = state.event_seq + 1
-    event = %{id: "event-#{seq}", seq: seq, at: DateTime.utc_now(), kind: kind, text: text}
+
+    event = %{
+      id: "event-#{seq}",
+      seq: seq,
+      at: DateTime.utc_now(),
+      kind: kind,
+      text: text,
+      details: details
+    }
+
     broadcast(state, {:connection_event, state.spec.id, event})
 
     %{state | events: Enum.take([event | state.events], @event_log_length), event_seq: seq}
@@ -872,4 +977,58 @@ defmodule SpectreStudio.Pulse.Connection do
   defp short(id) when is_binary(id), do: String.slice(id, 0, 8) <> "…"
 
   defp short_address(address), do: address |> String.split("/") |> List.last()
+
+  defp exposed_agent?(%{manifest: %Manifest{agents: agents}}, address),
+    do: Enum.any?(agents, &(&1.address == address))
+
+  defp exposed_agent?(_state, _address), do: false
+
+  defp normalize_instances(instances) when is_list(instances) do
+    instances
+    |> Enum.filter(fn instance ->
+      is_map(instance) and is_binary(instance["subject"]) and instance["subject"] != ""
+    end)
+    |> Enum.uniq_by(& &1["subject"])
+    |> Enum.sort_by(& &1["subject"])
+  end
+
+  defp normalize_instances(_instances), do: []
+
+  defp failure_envelope?(type) do
+    String.contains?(type, ".failed") or String.contains?(type, ".error")
+  end
+
+  defp envelope_summary(from, type, data) do
+    suffix =
+      case data do
+        %{"subject" => subject} when is_binary(subject) -> " · subject #{subject}"
+        _other -> ""
+      end
+
+    "#{from} · #{type}#{suffix}"
+  end
+
+  defp public_details(data) when is_map(data), do: data
+  defp public_details(_data), do: nil
+
+  defp observe_subject(state, agent_address, type, %{"subject" => subject})
+       when is_binary(agent_address) and is_binary(subject) and subject != "" do
+    if not String.starts_with?(type, "studio.") and exposed_agent?(state, agent_address) do
+      instance = %{"subject" => subject, "alive" => true, "observed" => true}
+
+      instances =
+        state.instances
+        |> Map.get(agent_address, [])
+        |> Enum.reject(&(&1["subject"] == subject))
+        |> then(&[instance | &1])
+
+      state = %{state | instances: Map.put(state.instances, agent_address, instances)}
+      broadcast(state, {:instances_changed, state.spec.id, agent_address, instances})
+      state
+    else
+      state
+    end
+  end
+
+  defp observe_subject(state, _agent_address, _type, _data), do: state
 end

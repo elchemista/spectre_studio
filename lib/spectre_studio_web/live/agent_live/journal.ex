@@ -11,6 +11,7 @@ defmodule SpectreStudioWeb.AgentLive.Journal do
 
   import SpectreStudioWeb.AgentLive.Shell
 
+  alias SpectreStudio.Pulse.Scopes
   alias SpectreStudio.Pulse.StudioBridge
   alias SpectreStudioWeb.AgentLive.Shell
 
@@ -18,13 +19,19 @@ defmodule SpectreStudioWeb.AgentLive.Journal do
   def mount(params, _session, socket) do
     case Shell.mount_agent(socket, params, :journal, :ledger_read) do
       {:ok, socket} ->
-        {:ok,
-         socket
-         |> assign(:turns, [])
-         |> assign(:revision, nil)
-         |> assign(:pending, %{})
-         |> assign(:error, nil)
-         |> assign(:form, journal_form())}
+        socket =
+          socket
+          |> assign(:turns, [])
+          |> assign(:revision, nil)
+          |> assign(:pending, %{})
+          |> assign(:error, nil)
+          |> assign(:selected_subject, nil)
+          |> assign(:form, journal_form())
+
+        if connected?(socket) and Scopes.can?(socket.assigns.connection.manifest, :runtime_read),
+          do: send(self(), :discover_instances)
+
+        {:ok, socket}
 
       {:redirect, socket} ->
         {:ok, socket}
@@ -38,28 +45,32 @@ defmodule SpectreStudioWeb.AgentLive.Journal do
     if subject == "" do
       {:noreply, assign(socket, :error, "a conversation subject is required")}
     else
-      case StudioBridge.journal_turns(
-             socket.assigns.connection.id,
-             socket.assigns.agent.address,
-             subject,
-             limit(params["limit"])
-           ) do
-        {:ok, envelope} ->
-          pending = Map.put(socket.assigns.pending, envelope["id"], :journal_turns)
-
-          {:noreply,
-           socket
-           |> assign(:pending, pending)
-           |> assign(:error, nil)
-           |> assign(:form, journal_form(params))}
-
-        {:error, reason} ->
-          {:noreply, assign(socket, :error, describe(reason))}
-      end
+      {:noreply, load_subject(socket, subject, limit(params["limit"]))}
     end
   end
 
   @impl Phoenix.LiveView
+  def handle_info(:discover_instances, socket) do
+    case Shell.refresh_instances(socket) do
+      {:ok, _request_id} -> {:noreply, socket}
+      {:error, reason} -> {:noreply, assign(socket, :error, describe(reason))}
+    end
+  end
+
+  def handle_info({:instances_changed, _id, address, instances}, socket)
+      when address == socket.assigns.agent.address do
+    socket = assign(socket, :instances, instances)
+
+    case Shell.first_subject(instances) do
+      nil -> {:noreply, socket}
+      subject -> {:noreply, load_subject(socket, subject, 50)}
+    end
+  end
+
+  def handle_info({:instances_failed, _id, address, error}, socket)
+      when address == socket.assigns.agent.address,
+      do: {:noreply, assign(socket, :error, describe(error))}
+
   def handle_info({:envelope, _connection_id, envelope}, socket) do
     case StudioBridge.response(envelope, socket.assigns.pending) do
       {:ok, request_id, :journal_turns, data} ->
@@ -75,7 +86,7 @@ defmodule SpectreStudioWeb.AgentLive.Journal do
         {:noreply, socket |> finish(request_id) |> assign(:error, describe(reason))}
 
       :unrelated ->
-        {:noreply, socket}
+        {:noreply, maybe_refresh_from_event(socket, envelope)}
     end
   end
 
@@ -98,16 +109,25 @@ defmodule SpectreStudioWeb.AgentLive.Journal do
       <div class="mt-6 space-y-6">
         <.term_window title="turn journal" status={status(@pending, @turns)}>
           <p class="mb-5 text-[0.76rem] leading-6 t-dim">
-            Loads the bounded chat history persisted by the Agent's Spectre state adapter.
-            The subject is the host conversation id, not the OTP Instance subject unless the host uses the same key.
+            Follows the active Agent Instance automatically and reloads when the host reports a new
+            turn or failure. A manual subject remains available for persisted conversations whose
+            Instance is no longer alive.
           </p>
 
           <.form for={@form} id="journal-form" phx-submit="load" class="grid gap-4 sm:grid-cols-3">
             <div class="sm:col-span-2">
               <.input
+                :if={@instances != []}
                 field={@form[:subject]}
-                label="conversation subject"
-                placeholder="conversation-123"
+                type="select"
+                label="live conversation"
+                options={Enum.map(@instances, &{&1["subject"], &1["subject"]})}
+              />
+              <.input
+                :if={@instances == []}
+                field={@form[:subject]}
+                label="persisted conversation subject"
+                placeholder="waiting for a live Instance…"
               />
             </div>
             <.input
@@ -123,7 +143,7 @@ defmodule SpectreStudioWeb.AgentLive.Journal do
 
           <p :if={@error} class="mt-4 term-out text-[0.75rem] t-fail">{@error}</p>
           <p :if={@revision} class="mt-4 term-comment text-[0.72rem] t-faint">
-            state revision {@revision}
+            subject {@selected_subject} · state revision {@revision}
           </p>
         </.term_window>
 
@@ -177,6 +197,38 @@ defmodule SpectreStudioWeb.AgentLive.Journal do
   @spec finish(Phoenix.LiveView.Socket.t(), String.t()) :: Phoenix.LiveView.Socket.t()
   defp finish(socket, request_id) do
     assign(socket, pending: Map.delete(socket.assigns.pending, request_id), error: nil)
+  end
+
+  defp load_subject(socket, subject, turn_limit) do
+    case StudioBridge.journal_turns(
+           socket.assigns.connection.id,
+           socket.assigns.agent.address,
+           subject,
+           turn_limit
+         ) do
+      {:ok, envelope} ->
+        pending = Map.put(socket.assigns.pending, envelope["id"], :journal_turns)
+
+        socket
+        |> assign(:pending, pending)
+        |> assign(:error, nil)
+        |> assign(:selected_subject, subject)
+        |> assign(:form, journal_form(%{"subject" => subject, "limit" => to_string(turn_limit)}))
+
+      {:error, reason} ->
+        assign(socket, :error, describe(reason))
+    end
+  end
+
+  defp maybe_refresh_from_event(socket, envelope) do
+    from = Map.get(envelope, "from")
+    subject = get_in(envelope, ["payload", "data", "subject"])
+
+    if from == socket.assigns.agent.address and is_binary(subject) and subject != "" do
+      load_subject(socket, subject, 50)
+    else
+      socket
+    end
   end
 
   @spec status(map(), [map()]) :: String.t()

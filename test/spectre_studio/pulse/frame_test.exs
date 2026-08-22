@@ -96,6 +96,27 @@ defmodule SpectreStudio.Pulse.FrameTest do
     end
   end
 
+  test "builds and decodes active Instance discovery frames" do
+    assert {:ok, request} = Frame.instances_list("request-1", "spectre://acme/researcher")
+
+    assert %{
+             "type" => "agent.instances.list",
+             "request_id" => "request-1",
+             "agent_address" => "spectre://acme/researcher"
+           } = Jason.decode!(request)
+
+    response =
+      Jason.encode!(%{
+        "pulse" => "connection",
+        "version" => 1,
+        "type" => "agent.instances.list.result",
+        "request_id" => "request-1",
+        "instances" => [%{"subject" => "conversation-42"}]
+      })
+
+    assert {:ok, {:instances, %{"request_id" => "request-1"}}} = Frame.decode(response)
+  end
+
   describe "envelope/1" do
     @valid [
       to: "spectre://acme/researcher",

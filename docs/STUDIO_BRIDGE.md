@@ -4,6 +4,20 @@ Studio sends scoped inspection and governance requests as ordinary Pulse
 envelopes. Current Spectre Pulse handles these requests at the authenticated
 connection boundary, so they never become Agent prompts or application turns.
 
+## Active Instance discovery
+
+Studio requests `agent.instances.list` when Live, Work/Vigil, or Journal opens.
+When Pulse returns at least one authorized live Instance, Studio selects its
+subject automatically: Live and Work/Vigil start streaming, while Journal loads
+the persisted turns and reloads when an Agent event for that subject arrives.
+The manual Journal subject remains available for an inactive conversation.
+
+Discovery requires `agent.runtime.read` and is limited to Agents exposed by the
+Pulse connection. Journal remains independently protected by `ledger.read`, and
+the streaming panels still require their own `*.stream` grants. Removing any
+scope from the host connection locks that surface and makes Pulse reject direct
+requests too.
+
 ## Available panels
 
 | Studio panel | Pulse payload | Required scope |

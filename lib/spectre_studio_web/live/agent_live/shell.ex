@@ -62,6 +62,7 @@ defmodule SpectreStudioWeb.AgentLive.Shell do
        |> Component.assign(:active_connection, id)
        |> Component.assign(:connection, connection)
        |> Component.assign(:agent, agent)
+       |> Component.assign(:instances, Map.get(connection.instances, agent.address, []))
        |> Component.assign(:tab, tab)}
     else
       nil -> {:redirect, redirect_to(socket, id, "No manifest yet — connect first.")}
@@ -101,6 +102,20 @@ defmodule SpectreStudioWeb.AgentLive.Shell do
       :error -> LiveView.push_navigate(socket, to: "/")
     end
   end
+
+  @doc "Requests a fresh authorized inventory of the Agent's live Instances."
+  @spec refresh_instances(LiveView.Socket.t()) :: {:ok, String.t()} | {:error, term()}
+  def refresh_instances(socket) do
+    Pulse.Connection.refresh_instances(
+      socket.assigns.connection.id,
+      socket.assigns.agent.address
+    )
+  end
+
+  @doc "Returns the first live subject, preferring the most recently observed one."
+  @spec first_subject([map()]) :: String.t() | nil
+  def first_subject([%{"subject" => subject} | _rest]) when is_binary(subject), do: subject
+  def first_subject(_instances), do: nil
 
   @doc "The path of one tab for one Agent."
   @spec tab_path(map(), Agent.t(), atom()) :: String.t()

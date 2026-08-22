@@ -38,18 +38,21 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
   def mount(params, _session, socket) do
     case Shell.mount_agent(socket, params, :monitor, :monitor_stream) do
       {:ok, socket} ->
-        {:ok,
-         socket
-         |> assign(:subscription_id, nil)
-         |> assign(:subscription, nil)
-         |> assign(:pending?, false)
-         |> assign(:pending_request_id, nil)
-         |> assign(:error, nil)
-         |> assign(:fields, Connection.default_fields())
-         |> assign(:summary_fields, @summary_fields)
-         |> assign(:intervals, @intervals)
-         |> assign(:durations, @durations)
-         |> assign(:form, monitor_form())}
+        socket =
+          socket
+          |> assign(:subscription_id, nil)
+          |> assign(:subscription, nil)
+          |> assign(:pending?, false)
+          |> assign(:pending_request_id, nil)
+          |> assign(:error, nil)
+          |> assign(:fields, Connection.default_fields())
+          |> assign(:summary_fields, @summary_fields)
+          |> assign(:intervals, @intervals)
+          |> assign(:durations, @durations)
+          |> assign(:form, monitor_form())
+
+        if connected?(socket), do: send(self(), :discover_instances)
+        {:ok, socket}
 
       {:redirect, socket} ->
         {:ok, socket}
@@ -63,35 +66,37 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
     if subject == "" do
       {:noreply, assign(socket, :error, "a subject is required to select an Instance")}
     else
-      opts = [
-        agent_address: socket.assigns.agent.address,
-        subject: subject,
-        interval_ms: to_integer(params["interval_ms"]),
-        duration_ms: to_integer(params["duration_ms"]),
-        fields: socket.assigns.fields
-      ]
-
-      case Connection.enable_monitor(socket.assigns.connection.id, opts) do
-        {:ok, request_id} ->
-          # The subscription id only exists once the host replies. Until then the
-          # control reports the request in flight — leaving it on "enable" invites
-          # a second click and a second subscription for the same panel.
-          {:noreply,
-           socket
-           |> assign(:pending?, true)
-           |> assign(:pending_request_id, request_id)
-           |> assign(:error, nil)
-           |> assign(:form, monitor_form(params))}
-
-        {:error, reason} ->
-          {:noreply, socket |> assign(:pending?, false) |> assign(:error, describe(reason))}
-      end
+      {:noreply, enable_subject(socket, subject, params)}
     end
   end
 
   def handle_event("disable", _params, socket), do: {:noreply, disable(socket)}
 
   @impl Phoenix.LiveView
+  def handle_info(:discover_instances, socket) do
+    case Shell.refresh_instances(socket) do
+      {:ok, _request_id} -> {:noreply, socket}
+      {:error, reason} -> {:noreply, assign(socket, :error, describe(reason))}
+    end
+  end
+
+  def handle_info({:instances_changed, _id, address, instances}, socket)
+      when address == socket.assigns.agent.address do
+    subject = Shell.first_subject(instances)
+    socket = assign(socket, :instances, instances)
+
+    if subject && is_nil(socket.assigns.subscription_id) && not socket.assigns.pending? do
+      params = %{"subject" => subject, "interval_ms" => "1000", "duration_ms" => ""}
+      {:noreply, enable_subject(socket, subject, params)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:instances_failed, _id, address, error}, socket)
+      when address == socket.assigns.agent.address,
+      do: {:noreply, assign(socket, :error, describe(error))}
+
   def handle_info(
         {:monitor_enabled, _id, request_id, subscription_id},
         %{assigns: %{pending_request_id: request_id}} = socket
@@ -188,6 +193,28 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
     )
   end
 
+  defp enable_subject(socket, subject, params) do
+    opts = [
+      agent_address: socket.assigns.agent.address,
+      subject: subject,
+      interval_ms: to_integer(params["interval_ms"]),
+      duration_ms: to_integer(params["duration_ms"]),
+      fields: socket.assigns.fields
+    ]
+
+    case Connection.enable_monitor(socket.assigns.connection.id, opts) do
+      {:ok, request_id} ->
+        socket
+        |> assign(:pending?, true)
+        |> assign(:pending_request_id, request_id)
+        |> assign(:error, nil)
+        |> assign(:form, monitor_form(Map.put(params, "subject", subject)))
+
+      {:error, reason} ->
+        socket |> assign(:pending?, false) |> assign(:error, describe(reason))
+    end
+  end
+
   defp monitor_form(params \\ %{}) do
     to_form(
       %{
@@ -252,7 +279,19 @@ defmodule SpectreStudioWeb.AgentLive.Monitor do
 
           <.form for={@form} id="monitor-form" phx-submit="enable" class="grid gap-4 md:grid-cols-4">
             <div class="md:col-span-2">
-              <.input field={@form[:subject]} label="subject" placeholder="account-123" />
+              <.input
+                :if={@instances != []}
+                field={@form[:subject]}
+                type="select"
+                label="live Instance"
+                options={Enum.map(@instances, &{&1["subject"], &1["subject"]})}
+              />
+              <.input
+                :if={@instances == []}
+                field={@form[:subject]}
+                label="subject"
+                placeholder="waiting for a live Instance…"
+              />
             </div>
             <div>
               <.input field={@form[:interval_ms]} type="select" label="interval" options={@intervals} />

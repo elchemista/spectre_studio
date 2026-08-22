@@ -27,6 +27,7 @@ defmodule SpectreStudio.Pulse.Frame do
           {:manifest, map()}
           | {:receipt, map()}
           | {:error, map()}
+          | {:instances, map()}
           | {:monitor, :runtime | :operations, String.t(), map()}
           | {:envelope, map()}
           | {:unknown, map()}
@@ -61,6 +62,9 @@ defmodule SpectreStudio.Pulse.Frame do
 
   defp classify(%{"pulse" => "connection", "type" => "error"} = value),
     do: {:ok, {:error, Map.get(value, "error", %{})}}
+
+  defp classify(%{"pulse" => "connection", "type" => "agent.instances.list.result"} = value),
+    do: {:ok, {:instances, value}}
 
   defp classify(%{"pulse" => "connection", "type" => "agent.runtime.monitor." <> event} = value),
     do: {:ok, {:monitor, :runtime, event, value}}
@@ -130,6 +134,22 @@ defmodule SpectreStudio.Pulse.Frame do
   end
 
   def monitor_disable(_kind, _subscription_id), do: {:error, :invalid_monitor_subscription}
+
+  @doc "Builds a request for the live Instances of one exposed Agent."
+  @spec instances_list(String.t(), String.t()) :: {:ok, binary()} | {:error, term()}
+  def instances_list(request_id, agent_address)
+      when is_binary(request_id) and request_id != "" and is_binary(agent_address) and
+             agent_address != "" do
+    encode(%{
+      "pulse" => "connection",
+      "version" => @protocol_version,
+      "type" => "agent.instances.list",
+      "request_id" => request_id,
+      "agent_address" => agent_address
+    })
+  end
+
+  def instances_list(_request_id, _agent_address), do: {:error, :invalid_instances_request}
 
   @doc """
   Builds an ordinary Pulse envelope.

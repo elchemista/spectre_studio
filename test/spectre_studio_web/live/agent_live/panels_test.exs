@@ -113,6 +113,20 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
       assert html =~ "message_queue_len"
     end
 
+    test "discovers a live Instance and starts OTP monitoring automatically", %{conn: conn} do
+      spec = connected_endpoint(instances: ["conversation-42"])
+      {:ok, live, _html} = live(conn, agent_path(spec, :monitor))
+
+      assert_receive {:monitor_enabled, _id, _request, subscription_id}, 5_000
+      assert_receive {:monitor_update, _id, ^subscription_id, _subscription}, 5_000
+
+      html = render(live)
+      assert html =~ "live Instance"
+      assert html =~ "conversation-42"
+      assert html =~ "OTP process snapshot"
+      assert html =~ "message_queue_len"
+    end
+
     test "a subject is required to select an Instance", %{conn: conn, spec: spec} do
       {:ok, live, _html} = live(conn, agent_path(spec, :monitor))
 
@@ -357,6 +371,22 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
       html = render(live)
       assert html =~ "The latest article is Runtime Safety."
       assert html =~ "state revision 7"
+      assert html =~ "2 turns"
+    end
+
+    test "discovers the active conversation and loads its Journal automatically", %{conn: conn} do
+      spec =
+        connected_endpoint(
+          scopes: ["agent.runtime.read", "ledger.read"],
+          instances: ["conversation-42"]
+        )
+
+      {:ok, live, _html} = live(conn, agent_path(spec, :journal))
+
+      assert_eventually(live, "The latest article is Runtime Safety.")
+      html = render(live)
+      assert html =~ "live conversation"
+      assert html =~ "subject conversation-42"
       assert html =~ "2 turns"
     end
   end

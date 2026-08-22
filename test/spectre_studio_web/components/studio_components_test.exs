@@ -124,6 +124,28 @@ defmodule SpectreStudioWeb.StudioComponentsTest do
       html = render_component(&stream/1, id: "events", events: [])
       assert html =~ "no events yet"
     end
+
+    test "failure rows expose their bounded payload instead of only the event name" do
+      events = [
+        %{
+          at: ~U[2026-08-22 12:04:34Z],
+          kind: :fail,
+          text: "freelance.agent.provider.embedding.failed.req_llm_request_failed",
+          details: %{
+            "subject" => "42",
+            "error" => "OpenRouter transport failed",
+            "message_id" => 118
+          }
+        }
+      ]
+
+      html = render_component(&stream/1, id: "events", events: events)
+
+      assert html =~ "req_llm_request_failed"
+      assert html =~ "OpenRouter transport failed"
+      assert html =~ "message_id"
+      assert html =~ "118"
+    end
   end
 
   defp block(text) do

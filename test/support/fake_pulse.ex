@@ -93,6 +93,9 @@ defmodule SpectreStudio.FakePulse do
         {:ok, %{"type" => "agent.operations.monitor.disable"} = frame} ->
           disable(:operations, frame, state)
 
+        {:ok, %{"type" => "agent.instances.list"} = frame} ->
+          list_instances(frame, state)
+
         {:ok, %{"payload" => _payload} = envelope} ->
           receipt(envelope, state)
 
@@ -252,6 +255,32 @@ defmodule SpectreStudio.FakePulse do
 
       {:push, {:text, response},
        %{state | subscriptions: Map.delete(state.subscriptions, subscription_id)}}
+    end
+
+    defp list_instances(frame, state) do
+      instances =
+        state.opts
+        |> Keyword.get(:instances, [])
+        |> Enum.map(fn subject ->
+          %{
+            "subject" => subject,
+            "instance_ref" => "instance:#{subject}",
+            "pid" => "#PID<0.42.0>",
+            "node" => "nonode@nohost",
+            "alive" => true
+          }
+        end)
+
+      response =
+        encode(%{
+          "type" => "agent.instances.list.result",
+          "request_id" => Map.get(frame, "request_id"),
+          "agent_address" => Map.get(frame, "agent_address"),
+          "count" => length(instances),
+          "instances" => instances
+        })
+
+      {:push, {:text, response}, state}
     end
 
     defp receipt(envelope, state) do

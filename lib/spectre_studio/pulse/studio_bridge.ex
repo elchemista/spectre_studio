@@ -24,10 +24,10 @@ defmodule SpectreStudio.Pulse.StudioBridge do
           | :skills_list
           | :morph_propose
 
-  @doc "Requests bounded semantic-cache review candidates for one Agent."
+  @doc "Requests every bounded semantic-cache source for one Agent."
   @spec cache_examples(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def cache_examples(connection_id, agent_address) do
-    query(connection_id, agent_address, @cache_examples, %{"source" => "online_learned"})
+    query(connection_id, agent_address, @cache_examples, %{"source" => "all", "limit" => 5_000})
   end
 
   @doc "Requests an authorized text/category update for one mutable cache example."

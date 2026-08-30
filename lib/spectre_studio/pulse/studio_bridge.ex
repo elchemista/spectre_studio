@@ -10,6 +10,7 @@ defmodule SpectreStudio.Pulse.StudioBridge do
   alias SpectreStudio.Pulse.Connection
 
   @cache_examples "studio.semantic_cache.examples"
+  @cache_update "studio.semantic_cache.update"
   @cache_verify "studio.semantic_cache.verify"
   @journal_turns "studio.journal.turns"
   @skills_list "studio.skills.list"
@@ -17,6 +18,7 @@ defmodule SpectreStudio.Pulse.StudioBridge do
 
   @type operation ::
           :cache_examples
+          | :cache_update
           | :cache_verify
           | :journal_turns
           | :skills_list
@@ -27,6 +29,26 @@ defmodule SpectreStudio.Pulse.StudioBridge do
   def cache_examples(connection_id, agent_address) do
     query(connection_id, agent_address, @cache_examples, %{"source" => "online_learned"})
   end
+
+  @doc "Requests an authorized text/category update for one mutable cache example."
+  @spec update_cache_example(String.t(), String.t(), String.t(), map()) ::
+          {:ok, map()} | {:error, term()}
+  def update_cache_example(connection_id, agent_address, example_id, attrs)
+      when is_binary(example_id) and example_id != "" and is_map(attrs) do
+    data =
+      %{"example_id" => example_id}
+      |> put_optional("text", Map.get(attrs, "text", Map.get(attrs, :text)))
+      |> put_optional("label", Map.get(attrs, "label", Map.get(attrs, :label)))
+
+    if map_size(data) > 1 do
+      request(connection_id, agent_address, @cache_update, data)
+    else
+      {:error, :empty_cache_update}
+    end
+  end
+
+  def update_cache_example(_connection_id, _agent_address, _example_id, _attrs),
+    do: {:error, :invalid_cache_update}
 
   @doc "Requests verification and promotion of one quarantined cache example."
   @spec verify_cache_example(String.t(), String.t(), String.t()) ::
@@ -71,6 +93,7 @@ defmodule SpectreStudio.Pulse.StudioBridge do
   @doc "Returns the logical operation represented by a bridge payload type."
   @spec operation(String.t()) :: operation() | nil
   def operation(@cache_examples), do: :cache_examples
+  def operation(@cache_update), do: :cache_update
   def operation(@cache_verify), do: :cache_verify
   def operation(@journal_turns), do: :journal_turns
   def operation(@skills_list), do: :skills_list
@@ -108,6 +131,9 @@ defmodule SpectreStudio.Pulse.StudioBridge do
       data: data
     )
   end
+
+  defp put_optional(data, _key, nil), do: data
+  defp put_optional(data, key, value), do: Map.put(data, key, value)
 
   @spec decode_response(map(), String.t(), operation()) ::
           {:ok, String.t(), operation(), map()} | {:error, String.t(), term()}

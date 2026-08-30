@@ -23,6 +23,7 @@ requests too.
 | Studio panel | Pulse payload | Required scope |
 | --- | --- | --- |
 | Semantic cache review | `studio.semantic_cache.examples` | `agent.semantic_cache.read` |
+| Edit mutable cache row | `studio.semantic_cache.update` | `agent.semantic_cache.write` |
 | Verify + promote cache row | `studio.semantic_cache.verify` | `agent.semantic_cache.promote` |
 | Journal / turns | `studio.journal.turns` | `ledger.read` |
 | Skill inventory | `studio.skills.list` | `spectre.skill.read` |
@@ -47,9 +48,14 @@ the transport accepted the envelope.
 
 ## What each operation means
 
-Semantic-cache verification calls the configured Spectre cache boundary. For
-the learned cache, verification is also promotion: the quarantined row becomes
-eligible for normal lookup.
+Semantic-cache editing calls the configured Spectre cache boundary and only
+accepts categories exposed by the Agent's cacheable routes. Only mutable
+online-learned rows may be changed; dataset and other static rows remain
+read-only. Editing does not verify a row.
+
+Semantic-cache verification is a separate operation. For the learned cache,
+verification is also promotion: the quarantined row becomes eligible for
+normal lookup.
 
 Journal/turns reads the bounded compact chat history from the Agent's persisted
 state. It is not the Studio connection event log, raw memory, or a complete

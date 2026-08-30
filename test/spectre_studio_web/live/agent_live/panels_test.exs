@@ -279,7 +279,12 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
 
   describe "with semantic-cache review scopes" do
     setup do
-      scopes = ["agent.semantic_cache.read", "agent.semantic_cache.promote"]
+      scopes = [
+        "agent.semantic_cache.read",
+        "agent.semantic_cache.write",
+        "agent.semantic_cache.promote"
+      ]
+
       {:ok, spec: connected_endpoint(scopes: scopes)}
     end
 
@@ -300,6 +305,34 @@ defmodule SpectreStudioWeb.AgentLive.PanelsTest do
       html = render(live)
       assert html =~ "verified"
       refute html =~ "verify + promote"
+    end
+
+    test "edits a mutable example and category without promoting it", %{conn: conn, spec: spec} do
+      {:ok, live, _html} = live(conn, agent_path(spec, :cache))
+      assert_eventually(live, "need a custom quote")
+
+      assert has_element?(live, "#edit-cache-1")
+      refute has_element?(live, "#edit-cache-static")
+
+      live |> element("#edit-cache-1") |> render_click()
+
+      assert has_element?(live, "#cache-edit-form-cache-1")
+      assert has_element?(live, "#example_label option[value=SUPPORT]")
+
+      live
+      |> form("#cache-edit-form-cache-1", %{
+        "example" => %{
+          "text" => "I need technical help with my account",
+          "label" => "SUPPORT"
+        }
+      })
+      |> render_submit()
+
+      assert_eventually(live, "example changes saved")
+      assert has_element?(live, "#cache-example-cache-1", "I need technical help with my account")
+      assert has_element?(live, "#cache-example-cache-1", "SUPPORT")
+      assert has_element?(live, "#verify-cache-1")
+      refute has_element?(live, "#cache-edit-form-cache-1")
     end
   end
 

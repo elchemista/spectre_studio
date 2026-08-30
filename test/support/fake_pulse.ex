@@ -321,20 +321,48 @@ defmodule SpectreStudio.FakePulse do
 
     defp bridge_data("studio.semantic_cache.examples", _envelope) do
       %{
+        "labels" => ["PRICING", "SALES", "SUPPORT"],
         "examples" => [
           %{
             "id" => "cache-1",
             "text" => "need a custom quote",
             "label" => "SALES",
-            "verified?" => false
+            "verified?" => false,
+            "source" => "online_learned",
+            "editable?" => true
           },
           %{
             "id" => "cache-2",
             "text" => "pricing please",
             "label" => "PRICING",
-            "verified?" => true
+            "verified?" => true,
+            "source" => "online_learned",
+            "editable?" => true
+          },
+          %{
+            "id" => "cache-static",
+            "text" => "static dataset example",
+            "label" => "SUPPORT",
+            "verified?" => true,
+            "source" => "offline_dataset",
+            "editable?" => false
           }
         ]
+      }
+    end
+
+    defp bridge_data("studio.semantic_cache.update", envelope) do
+      data = get_in(envelope, ["payload", "data"])
+
+      %{
+        "example" => %{
+          "id" => data["example_id"],
+          "text" => data["text"],
+          "label" => data["label"],
+          "verified?" => false,
+          "source" => "online_learned",
+          "editable?" => true
+        }
       }
     end
 
@@ -346,7 +374,9 @@ defmodule SpectreStudio.FakePulse do
           "id" => example_id,
           "text" => "need a custom quote",
           "label" => "SALES",
-          "verified?" => true
+          "verified?" => true,
+          "source" => "online_learned",
+          "editable?" => true
         }
       }
     end

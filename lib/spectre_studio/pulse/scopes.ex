@@ -22,6 +22,7 @@ defmodule SpectreStudio.Pulse.Scopes do
     operations_stream: ["agent.operations.read", "agent.operations.stream"],
     message_send: ["agent.message.send"],
     semantic_cache_read: ["agent.semantic_cache.read"],
+    semantic_cache_write: ["agent.semantic_cache.write"],
     semantic_cache_promote: ["agent.semantic_cache.promote"],
     skill_read: ["spectre.skill.read"],
     skill_create: ["spectre.skill.runtime.mount"],
@@ -38,6 +39,7 @@ defmodule SpectreStudio.Pulse.Scopes do
           | :operations_stream
           | :message_send
           | :semantic_cache_read
+          | :semantic_cache_write
           | :semantic_cache_promote
           | :skill_read
           | :skill_create

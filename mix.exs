@@ -55,7 +55,7 @@ defmodule SpectreStudio.MixProject do
        app: false,
        compile: false,
        depth: 1},
-      {:spectre, "~> 0.3.2"},
+      {:spectre, "~> 0.3.4"},
       {:spectre_lab, github: "elchemista/spectre_lab", branch: "main", depth: 1},
       {:mint_web_socket, "~> 1.0"},
       {:castore, "~> 1.0"},

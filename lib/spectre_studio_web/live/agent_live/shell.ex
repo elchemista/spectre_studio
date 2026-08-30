@@ -28,7 +28,7 @@ defmodule SpectreStudioWeb.AgentLive.Shell do
     %{
       key: :cache,
       label: "semantic cache",
-      capability: {:any, [:semantic_cache_read, :semantic_cache_promote]}
+      capability: {:any, [:semantic_cache_read, :semantic_cache_write, :semantic_cache_promote]}
     },
     %{key: :journal, label: "journal / turns", capability: :ledger_read},
     %{

@@ -15,6 +15,7 @@ defmodule SpectreStudioWeb.AgentLive.Overview do
     {:monitor_stream, "OTP process info", "safe Process.info/2 snapshots and live series"},
     {:operations_stream, "Work / Vigil", "bounded operation snapshots and lifecycle state"},
     {:semantic_cache_read, "Semantic cache · inspect", "review cache examples"},
+    {:semantic_cache_write, "Semantic cache · edit", "change a mutable example and category"},
     {:semantic_cache_promote, "Semantic cache · verify", "promote one reviewed example"},
     {:ledger_read, "Journal / turns", "load persisted conversation turn history"},
     {:skill_read, "Skill inventory", "list compiled and governed Skill mounts"},

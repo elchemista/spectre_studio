@@ -4,6 +4,11 @@ Studio sends scoped inspection and governance requests as ordinary Pulse
 envelopes. Current Spectre Pulse handles these requests at the authenticated
 connection boundary, so they never become Agent prompts or application turns.
 
+This integration targets the retained `Spectre.Instance` APIs. Studio currently
+pins Spectre `~> 0.3.4`; these messages do not expose the 0.4 AgentServer
+diagnostic API. A host must provide the compatible Pulse bridge and grants
+described below.
+
 ## Active Instance discovery
 
 Studio requests `agent.instances.list` when Live, Work/Vigil, or Journal opens.

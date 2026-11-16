@@ -1,0 +1,5 @@
+flowchart TB
+  Browser[Operator browser] --> Studio[Phoenix LiveView]
+  Studio -->|Authenticated WSS| Pulse[Pulse in the host application]
+  Pulse --> Instances[Exposed Agent Instances]
+  Studio --> Lab[Offline Lab bundles]

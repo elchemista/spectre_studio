@@ -11,16 +11,22 @@ Studio contains no Agent logic and does not touch Agent processes. It uses:
   checkpoint playback and comparison;
 - other Spectre extensions through the bridge in [`docs/STUDIO_BRIDGE.md`](docs/STUDIO_BRIDGE.md).
 
-```text
-Spectre Studio
-      │
-      │ WSS + authentication
-      ▼
-Spectre Pulse (in the host application)
-      ├── Agent A
-      ├── Agent B
-      └── Agent C
-```
+![Spectre Studio: architecture](docs/assets/readme-architecture.svg)
+
+[Diagram source](docs/assets/readme-architecture.mmd).
+
+## Spectre compatibility
+
+Studio currently depends on Spectre `~> 0.3.4` and uses the retained
+`Spectre.Instance` monitoring and bridge APIs. Its panels have not been migrated
+to the 0.4 `Spectre.Server` diagnostics protocol. Keep a compatible host/Pulse
+version for this bridge; changing the core dependency alone does not migrate
+the integration. The core [compatibility guide](https://github.com/elchemista/spectre/blob/main/docs/COMPATIBILITY.md)
+indexes the retained APIs and their legacy guides.
+
+The [0.4 playground](https://github.com/elchemista/demo_spectre) demonstrates the
+AgentServer, shared GAM and PostgreSQL integration. See the
+[bridge guide](docs/STUDIO_BRIDGE.md) for the protocol Studio currently supports.
 
 ## Running it
 
@@ -117,7 +123,6 @@ The bridge shapes and host responsibilities are in
 
 ## Documentation
 
-- [`PLAN.md`](PLAN.md) — the build plan and its current state
 - [`docs/UI.md`](docs/UI.md) — the visual language, its tokens and components
 - [`docs/STUDIO_BRIDGE.md`](docs/STUDIO_BRIDGE.md) — Pulse operations and grants
   that unlock Cache, Journal, Skills and Morph
